@@ -278,6 +278,22 @@ export class SQLiteClient {
             return opfsBytes;
         }
 
+        // First-run: fetch bundled default data
+        try {
+            const response = await fetch('./assets/default-data.sqlite');
+            if (response.ok) {
+                const arrayBuffer = await response.arrayBuffer();
+                const bytes = new Uint8Array(arrayBuffer);
+                if (bytes.length > 0) {
+                    this.storageMode = 'memory'; // Will persist to OPFS on next persist()
+                    return bytes;
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to fetch default-data.sqlite:', error);
+        }
+
+        // Empty database (no OPFS, no default file)
         return null;
     }
 
