@@ -9,10 +9,11 @@ export function renderLapTable(tbody, rows, selectedLapId, raceStartTimeIso = nu
 
     tbody.innerHTML = rows
         .map((row) => {
+            const hasPitTag = Boolean(row.is_pit_lap);
+            const hasIncidentTag = Number(row.incident_count) > 0;
             const flags = [
-                row.is_outlier ? 'Outlier' : null,
-                row.is_pit_candidate ? 'Pit' : null,
-                row.is_repair_candidate ? 'Repair' : null,
+                hasPitTag ? 'Pit' : null,
+                row.is_outlier && !hasPitTag && !hasIncidentTag ? 'Outlier' : null,
                 row.note_count ? `${row.note_count} note` : null,
                 row.incident_count ? `${row.incident_count} incident` : null,
             ]

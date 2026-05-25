@@ -11,17 +11,12 @@ export function normalizeRaceData(parsedRows) {
         const isOutlier = Number.isFinite(lapTimeMs)
             && Number.isFinite(rollingMedianMs)
             && lapTimeMs > rollingMedianMs * 1.3;
-        // Pit/repair flags are user-reviewed/manual, so import does not auto-apply them.
-        const isPitCandidate = false;
-        const isRepairCandidate = false;
         const isGreenFlag = Number.isFinite(lapTimeMs) && !isOutlier;
 
         return {
             ...row,
             rollingMedianMs,
             isOutlier,
-            isPitCandidate,
-            isRepairCandidate,
             isGreenFlag,
             searchText: [
                 row.driverName,

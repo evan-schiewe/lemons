@@ -56,6 +56,10 @@ export function getLapTableRows(db, raceId, filters, sort) {
                 SELECT
                     nl.*,
                     ${resolvedDriverNameSql('nl')} AS display_driver_name,
+                    LEAD(${resolvedDriverNameSql('nl')}) OVER (
+                        PARTITION BY nl.race_id
+                        ORDER BY nl.lap_number ASC
+                    ) AS next_display_driver_name,
                     COALESCE(
                         SUM(COALESCE(nl.lap_time_ms, 0)) OVER (
                             PARTITION BY nl.race_id
@@ -79,7 +83,15 @@ export function getLapTableRows(db, raceId, filters, sort) {
                 ) ti ON ti.race_id = nl.race_id AND ti.lap_number = nl.lap_number
                 WHERE nl.race_id = ?
             )
-            SELECT *
+            SELECT
+                race_laps.*,
+                CASE
+                    WHEN race_laps.next_display_driver_name IS NOT NULL
+                        AND COALESCE(race_laps.display_driver_name, '') <> ''
+                        AND race_laps.display_driver_name <> race_laps.next_display_driver_name
+                    THEN 1
+                    ELSE 0
+                END AS is_pit_lap
             FROM race_laps
             ${whereSql}
             ORDER BY ${orderBy} ${direction}, lap_number ASC
@@ -106,9 +118,7 @@ export function getLapSeries(db, raceId, filters) {
         gap_leader_laps,
         gap_leader_display,
         is_outlier,
-        is_green_flag,
-        is_pit_candidate,
-        is_repair_candidate
+        is_green_flag
       FROM normalized_laps
       ${whereSql}
             ORDER BY lap_number ASC
@@ -126,7 +136,6 @@ export function getSummary(db, raceId, filters) {
         MIN(lap_time_ms) AS best_lap_ms,
         AVG(CASE WHEN is_green_flag = 1 THEN lap_time_ms END) AS avg_green_ms,
         SUM(CASE WHEN is_outlier = 1 THEN 1 ELSE 0 END) AS long_lap_outliers,
-        SUM(CASE WHEN is_pit_candidate = 1 OR is_repair_candidate = 1 THEN 1 ELSE 0 END) AS pit_repair_candidates,
         MIN(position_value) AS best_position,
         MAX(position_value) AS worst_position
       FROM normalized_laps
@@ -171,39 +180,32 @@ export function getRaceAnnotations(db, raceId) {
 }
 
 /**
- * Get combined candidates (pit + repair + outlier) for the active race.
+ * Get candidate laps (outliers) for the active race.
  * Sorted by lap_number, id for deterministic traversal.
- * Returns basic lap data plus candidate type flags.
+ * Returns basic lap data plus candidate_type label.
  */
 export function getCandidates(db, raceId) {
     return db.query(
         `
       SELECT
-        id,
-        lap_number,
-        driver_name,
-        lap_time_ms,
-        position_value,
-        speed_mph,
-        gap_ahead_ms,
-        gap_ahead_laps,
-        gap_ahead_display,
-        gap_leader_ms,
-        gap_leader_laps,
-        gap_leader_display,
-        is_outlier,
-        is_green_flag,
-        is_pit_candidate,
-        is_repair_candidate,
-        CASE
-          WHEN is_repair_candidate = 1 THEN 'repair'
-          WHEN is_pit_candidate = 1 THEN 'pit'
-          WHEN is_outlier = 1 THEN 'outlier'
-          ELSE 'unknown'
-        END AS candidate_type
-      FROM normalized_laps
-      WHERE race_id = ? AND (is_pit_candidate = 1 OR is_repair_candidate = 1 OR is_outlier = 1)
-      ORDER BY lap_number ASC, id ASC
+                nl.id,
+                nl.lap_number,
+                ${resolvedDriverNameSql('nl')} AS driver_name,
+                nl.lap_time_ms,
+                nl.position_value,
+                nl.speed_mph,
+                nl.gap_ahead_ms,
+                nl.gap_ahead_laps,
+                nl.gap_ahead_display,
+                nl.gap_leader_ms,
+                nl.gap_leader_laps,
+                nl.gap_leader_display,
+                nl.is_outlier,
+                nl.is_green_flag,
+                'outlier' AS candidate_type
+            FROM normalized_laps nl
+                        WHERE nl.race_id = ? AND nl.is_outlier = 1
+            ORDER BY nl.lap_number ASC, nl.id ASC
     `,
         [raceId],
     );
@@ -224,7 +226,13 @@ export function inferCandidateReviewedStatus(candidate, annotations, db, raceId)
     // Check for driver change at this lap (stint boundary)
     if (db && raceId && lap_number > 1) {
         const previousLap = db.queryOne(
-            `SELECT driver_name FROM normalized_laps WHERE race_id = ? AND lap_number = ? ORDER BY lap_number DESC LIMIT 1`,
+            `
+            SELECT ${resolvedDriverNameSql('nl')} AS driver_name
+            FROM normalized_laps nl
+            WHERE nl.race_id = ? AND nl.lap_number = ?
+            ORDER BY nl.lap_number DESC
+            LIMIT 1
+            `,
             [raceId, lap_number - 1],
         );
         if (previousLap && previousLap.driver_name !== driver_name) {

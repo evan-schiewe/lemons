@@ -11,7 +11,6 @@ export function renderSummaryCards(container, summary) {
         { label: 'Best Lap', value: formatDurationMs(summary.best_lap_ms) },
         { label: 'Green Flag Pace', value: formatDurationMs(summary.avg_green_ms) },
         { label: 'Long Lap Outliers', value: formatNumber(summary.long_lap_outliers) },
-        { label: 'Pit / Repair Candidates', value: formatNumber(summary.pit_repair_candidates) },
         { label: 'Total Laps', value: formatNumber(summary.total_laps) },
         {
             label: 'Position Range',

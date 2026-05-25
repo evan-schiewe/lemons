@@ -80,9 +80,9 @@ export async function importRace(db, file) {
                     id, race_id, raw_row_id, lap_identity, lap_number, driver_name,
           lap_time_ms, lap_time_text, position_value, speed_mph, gap_ahead_ms, gap_ahead_laps,
           gap_ahead_display, gap_leader_ms, gap_leader_laps, gap_leader_display,
-          rolling_median_ms, is_pit_candidate, is_repair_candidate, is_outlier, is_green_flag,
+          rolling_median_ms, is_outlier, is_green_flag,
           search_text
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
             normalized.laps.map((lap) => {
                 const rawRow = rawRows[lap.rowIndex];
@@ -104,8 +104,6 @@ export async function importRace(db, file) {
                     lap.gapLeader.laps,
                     lap.gapLeader.display,
                     lap.rollingMedianMs,
-                    lap.isPitCandidate ? 1 : 0,
-                    lap.isRepairCandidate ? 1 : 0,
                     lap.isOutlier ? 1 : 0,
                     lap.isGreenFlag ? 1 : 0,
                     lap.searchText,

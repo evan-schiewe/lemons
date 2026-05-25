@@ -47,8 +47,6 @@ CREATE TABLE IF NOT EXISTS normalized_laps (
   gap_leader_laps REAL,
   gap_leader_display TEXT,
   rolling_median_ms INTEGER,
-  is_pit_candidate INTEGER NOT NULL DEFAULT 0,
-  is_repair_candidate INTEGER NOT NULL DEFAULT 0,
   is_outlier INTEGER NOT NULL DEFAULT 0,
   is_green_flag INTEGER NOT NULL DEFAULT 0,
   search_text TEXT NOT NULL DEFAULT ''

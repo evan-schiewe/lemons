@@ -42,6 +42,8 @@ const refs = {
     annotationPanelContainer: document.querySelector('#annotation-panel-container'),
     tabButtons: document.querySelectorAll('.tab-button'),
     tabContents: document.querySelectorAll('.tab-content'),
+    annotationSubtabButtons: document.querySelectorAll('.annotation-subtab-button'),
+    annotationSubtabContents: document.querySelectorAll('.annotation-subtab-content'),
 };
 
 const state = {
@@ -55,6 +57,12 @@ const state = {
         direction: 'asc',
     },
     currentRows: [],
+    currentAnnotations: {
+        lapNotes: [],
+        taggedIncidents: [],
+        rangeEvents: [],
+        driverStints: [],
+    },
     helperMode: false,
     helperCurrentIndex: 0,
     helperAutoAdvance: false,
@@ -247,18 +255,24 @@ function wireEvents() {
 
         await refreshView();
     });
-    refs.tableBody.addEventListener('click', (event) => {
+    refs.tableBody.addEventListener('click', async (event) => {
         const row = event.target.closest('tr[data-lap-id]');
         if (!row) {
             return;
         }
 
-        handleLapSelection(row.dataset.lapId);
+        const selectedRow = state.currentRows.find((item) => item.id === row.dataset.lapId);
+        if (!selectedRow) {
+            return;
+        }
+
+        await selectLapAndOpenDetails(selectedRow);
     });
     window.addEventListener('resize', () => {
         charts.lapTime.resize();
     });
     setupTabSwitching();
+    setupAnnotationSubtabs();
 }
 
 function setupTabSwitching() {
@@ -294,6 +308,41 @@ function setupTabSwitching() {
     const savedTabButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === savedTab);
     if (savedTabButton) {
         savedTabButton.click();
+    }
+}
+
+function setupAnnotationSubtabs() {
+    refs.annotationSubtabButtons.forEach((button) => {
+        button.addEventListener('click', (event) => {
+            const subtabName = event.target.dataset.annotationTab;
+            if (!subtabName) return;
+
+            refs.annotationSubtabButtons.forEach((btn) => {
+                btn.classList.remove('active');
+                btn.setAttribute('aria-selected', 'false');
+            });
+            event.target.classList.add('active');
+            event.target.setAttribute('aria-selected', 'true');
+
+            refs.annotationSubtabContents.forEach((content) => {
+                content.classList.remove('active');
+                content.hidden = true;
+            });
+
+            const activeSubtab = document.querySelector(`#annotation-${subtabName}-tab`);
+            if (activeSubtab) {
+                activeSubtab.classList.add('active');
+                activeSubtab.hidden = false;
+            }
+
+            localStorage.setItem('activeAnnotationSubtab', subtabName);
+        });
+    });
+
+    const savedSubtab = localStorage.getItem('activeAnnotationSubtab') || 'editor';
+    const savedSubtabButton = Array.from(refs.annotationSubtabButtons).find((btn) => btn.dataset.annotationTab === savedSubtab);
+    if (savedSubtabButton) {
+        savedSubtabButton.click();
     }
 }
 
@@ -383,12 +432,20 @@ async function refreshView() {
     if (!state.activeRaceId) {
         renderSummaryCards(refs.summaryCards, null);
         renderLapTable(refs.tableBody, [], state.selectedLapId, null);
+        state.currentAnnotations = {
+            lapNotes: [],
+            taggedIncidents: [],
+            rangeEvents: [],
+            driverStints: [],
+        };
         if (annotationHelper) {
             annotationHelper.render(null);
         }
         if (annotationPanel) {
             annotationPanel.render({
                 selectedLapRow: null,
+                rows: [],
+                raceStartTime: null,
                 annotations: {
                     lapNotes: [],
                     taggedIncidents: [],
@@ -407,6 +464,7 @@ async function refreshView() {
     const annotations = getRaceAnnotations(state.db, state.activeRaceId);
 
     state.currentRows = rows;
+    state.currentAnnotations = annotations;
     if (state.selectedLapId && !rows.some((row) => row.id === state.selectedLapId)) {
         state.selectedLapId = '';
     }
@@ -454,6 +512,8 @@ async function refreshView() {
     if (annotationPanel) {
         annotationPanel.render({
             selectedLapRow,
+            rows,
+            raceStartTime: activeRace?.race_start_time ?? null,
             annotations,
         });
     }
@@ -476,15 +536,48 @@ function handleLapSelection(lapId) {
     refreshView();
 }
 
-function handleLapSelectionByNumber(lapNumber) {
+async function handleLapSelectionByNumber(lapNumber) {
     const selectedRow = state.currentRows.find((row) => row.lap_number === lapNumber);
     if (selectedRow) {
-        state.selectedLapId = selectedRow.id;
-        refreshView();
+        await selectLapAndOpenDetails(selectedRow);
     }
 
     // Scroll table to the clicked lap
     scrollToLap(lapNumber);
+}
+
+async function selectLapAndOpenDetails(selectedRow) {
+    if (!selectedRow) {
+        return;
+    }
+
+    state.selectedLapId = selectedRow.id;
+    await refreshView();
+
+    if (!hasAnnotationsForLap(selectedRow, state.currentAnnotations)) {
+        return;
+    }
+
+    const activeRace = state.races.find((race) => race.id === state.activeRaceId);
+    annotationPanel?.openLapDetails({
+        selectedLapRow: selectedRow,
+        rows: state.currentRows,
+        raceStartTime: activeRace?.race_start_time ?? null,
+        annotations: state.currentAnnotations,
+    });
+}
+
+function hasAnnotationsForLap(lapRow, annotations) {
+    if (!lapRow || !annotations) {
+        return false;
+    }
+
+    const lapNumber = lapRow.lap_number;
+
+    return annotations.lapNotes.some((item) => item.lap_number === lapNumber)
+        || annotations.taggedIncidents.some((item) => item.lap_number === lapNumber)
+        || annotations.rangeEvents.some((item) => item.start_lap <= lapNumber && lapNumber <= item.end_lap)
+        || annotations.driverStints.some((item) => item.start_lap <= lapNumber && lapNumber <= item.end_lap);
 }
 
 function setStatus(message) {

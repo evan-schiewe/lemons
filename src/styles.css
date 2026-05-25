@@ -302,6 +302,15 @@ tbody tr:hover {
   background: rgba(247, 211, 168, 0.28);
 }
 
+tbody tr[data-lap-id] {
+  cursor: pointer;
+}
+
+tbody tr.is-selected {
+  background: rgba(217, 79, 43, 0.16);
+  box-shadow: inset 3px 0 0 #d94f2b;
+}
+
 .annotation-panel form,
 .annotation-list {
   display: grid;
@@ -311,6 +320,39 @@ tbody tr:hover {
 .annotations-workspace {
   display: grid;
   gap: 18px;
+}
+
+.annotation-subtab-switcher {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 6px;
+  border-radius: 14px;
+  background: rgba(31, 27, 22, 0.06);
+}
+
+.annotation-subtab-button {
+  border: 0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  cursor: pointer;
+  background: transparent;
+  color: #5b4d3c;
+  font-weight: 600;
+}
+
+.annotation-subtab-button.active {
+  background: rgba(255, 250, 244, 0.95);
+  color: #1f1b16;
+  box-shadow: 0 2px 8px rgba(31, 27, 22, 0.12);
+}
+
+.annotation-subtab-content {
+  display: none;
+}
+
+.annotation-subtab-content.active {
+  display: block;
 }
 
 .annotations-workspace-section {
@@ -352,6 +394,49 @@ tbody tr:hover {
   margin-top: 6px;
   color: #b24b24;
   font-weight: 600;
+}
+
+.selected-lap-details {
+  display: grid;
+  gap: 12px;
+}
+
+.selected-lap-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.selected-lap-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.selected-lap-list {
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(245, 238, 229, 0.9);
+}
+
+.selected-lap-list h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+}
+
+.selected-lap-list ul {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 6px;
+}
+
+.selected-lap-item-actions {
+  margin-top: 6px;
+}
+
+.selected-lap-item-actions .button {
+  padding: 6px 12px;
 }
 
 .annotation-form-switcher {
@@ -438,6 +523,78 @@ tbody tr:hover {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.annotation-context-table {
+  background: linear-gradient(180deg, rgba(241, 245, 250, 0.8), rgba(230, 240, 248, 0.6));
+  border-color: rgba(37, 99, 235, 0.2);
+}
+
+.annotation-context-table h4 {
+  margin: 0 0 12px 0;
+  font-size: 0.95rem;
+  color: #1f4d7b;
+}
+
+.annotation-mini-table {
+  width: 100%;
+  font-size: 0.82rem;
+  border-collapse: collapse;
+}
+
+.annotation-mini-table thead {
+  background: rgba(37, 99, 235, 0.08);
+  border-bottom: 1px solid rgba(37, 99, 235, 0.2);
+}
+
+.annotation-mini-table th {
+  padding: 8px 6px;
+  text-align: left;
+  font-weight: 600;
+  color: #1f4d7b;
+}
+
+.annotation-mini-table th.annotation-context-label-header {
+  width: 70px;
+  padding-left: 0;
+}
+
+.annotation-mini-table tbody tr {
+  border-bottom: 1px solid rgba(37, 99, 235, 0.1);
+}
+
+.annotation-mini-table tbody tr:last-child {
+  border-bottom: none;
+}
+
+.annotation-mini-table tbody tr.current {
+  background: rgba(37, 99, 235, 0.08);
+  font-weight: 500;
+}
+
+.annotation-mini-table tbody tr.before,
+.annotation-mini-table tbody tr.after {
+  background: rgba(255, 255, 255, 0.5);
+  opacity: 0.85;
+}
+
+.annotation-mini-table td {
+  padding: 8px 6px;
+  color: #2d2219;
+}
+
+.annotation-mini-table td.annotation-context-label {
+  font-weight: 600;
+  color: #1f4d7b;
+  padding-left: 0;
+}
+
+.annotation-mini-table tbody tr.before td.annotation-context-label {
+  color: #8b7d72;
+}
+
+.annotation-mini-table tbody tr.after td.annotation-context-label {
+  color: #8b7d72;
 }
 
 @media (max-width: 1120px) {
