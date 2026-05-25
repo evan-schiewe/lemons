@@ -57,6 +57,7 @@ The current implementation already exports durable `.json` and `.sqlite` backups
 
 - Primary mode: OPFS-backed SQLite file cache in the browser origin.
 - Durable workflow: export `.json` or `.sqlite` after annotation work you care about.
+- Restore workflow: use **Restore SQLite** to import a previously exported `.sqlite` backup and repopulate all races and annotations.
 - Re-import behavior: importing the same CSV content updates the same race record instead of duplicating it.
 - Annotation behavior: re-import refreshes raw and normalized laps while keeping the race identity stable, so stored annotations remain attached to the same race.
 
@@ -65,7 +66,7 @@ The current implementation already exports durable `.json` and `.sqlite` backups
 The importer expects 8 logical columns in this order, or a matching header row that maps onto them:
 
 1. `lap`
-2. `car`
+2. `team_slot`
 3. `driver`
 4. `lap_time`
 5. `position`
@@ -87,7 +88,7 @@ Known malformed rows are repaired with domain-specific handling rather than gene
 
 - lap times and gap-like values are parsed into numeric millisecond fields where possible
 - gap phrases containing lap counts preserve lap semantics separately from pure time gaps
-- `is_outlier = true` when a lap exceeds 130% of the car's rolling median lap time
+- `is_outlier = true` when a lap exceeds 130% of the rolling median lap time
 - “Green Flag Pace” is computed from laps that are not outliers, pit candidates, or repair candidates
 - pit and repair candidates are derived from larger rolling-median deviations so long laps are easy to distinguish in summaries and charts
 
@@ -99,4 +100,5 @@ Known malformed rows are repaired with domain-specific handling rather than gene
 - Use the Reset Storage button to delete all stored races, annotations, and cached SQLite data for the site
 - Add lap notes, incidents, range events, and driver stints
 - Export the annotated race as `.json` and the whole database as `.sqlite`
+- Restore the exported `.sqlite` and confirm races and annotations reload
 - Confirm the lap table, summary cards, and all chart views continue to populate from the persisted SQLite data

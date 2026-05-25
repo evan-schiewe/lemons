@@ -19,7 +19,7 @@ CREATE TABLE IF NOT EXISTS raw_lap_rows (
   csv_row_number INTEGER NOT NULL,
   raw_line TEXT NOT NULL,
   raw_lap TEXT,
-  raw_car TEXT,
+  raw_entry TEXT,
   raw_driver TEXT,
   raw_lap_time TEXT,
   raw_position TEXT,
@@ -35,7 +35,6 @@ CREATE TABLE IF NOT EXISTS normalized_laps (
   raw_row_id TEXT REFERENCES raw_lap_rows(id) ON DELETE SET NULL,
   lap_identity TEXT NOT NULL UNIQUE,
   lap_number INTEGER NOT NULL,
-  car_number TEXT NOT NULL,
   driver_name TEXT,
   lap_time_ms INTEGER,
   lap_time_text TEXT,
@@ -64,7 +63,7 @@ SELECT
   r.race_start_time,
   COALESCE(
     SUM(COALESCE(nl.lap_time_ms, 0)) OVER (
-      PARTITION BY nl.race_id, nl.car_number
+      PARTITION BY nl.race_id
       ORDER BY nl.lap_number ASC
       ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
     ),
@@ -77,7 +76,6 @@ CREATE TABLE IF NOT EXISTS lap_notes (
   id TEXT PRIMARY KEY,
   race_id TEXT NOT NULL REFERENCES races(id) ON DELETE CASCADE,
   lap_number INTEGER NOT NULL,
-  car_number TEXT,
   driver_name TEXT,
   note_text TEXT NOT NULL,
   color TEXT NOT NULL DEFAULT '#f59e0b',
@@ -114,7 +112,6 @@ CREATE TABLE IF NOT EXISTS driver_stints (
   id TEXT PRIMARY KEY,
   race_id TEXT NOT NULL REFERENCES races(id) ON DELETE CASCADE,
   driver_name TEXT NOT NULL,
-  car_number TEXT,
   start_lap INTEGER NOT NULL,
   end_lap INTEGER NOT NULL,
   color TEXT NOT NULL DEFAULT '#059669',

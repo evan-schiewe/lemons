@@ -53,7 +53,7 @@ export async function importRace(db, file) {
                     row.csvRowNumber,
                     row.rawLine,
                     row.values.lap,
-                    row.values.car,
+                    row.values.team_slot,
                     row.values.driver,
                     row.values.lap_time,
                     row.values.position,
@@ -67,7 +67,7 @@ export async function importRace(db, file) {
         db.executeMany(
             `
         INSERT INTO raw_lap_rows (
-          id, race_id, row_index, csv_row_number, raw_line, raw_lap, raw_car, raw_driver,
+                    id, race_id, row_index, csv_row_number, raw_line, raw_lap, raw_entry, raw_driver,
           raw_lap_time, raw_position, raw_speed, raw_gap_ahead, raw_gap_leader
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
@@ -77,12 +77,12 @@ export async function importRace(db, file) {
         db.executeMany(
             `
         INSERT INTO normalized_laps (
-          id, race_id, raw_row_id, lap_identity, lap_number, car_number, driver_name,
+                    id, race_id, raw_row_id, lap_identity, lap_number, driver_name,
           lap_time_ms, lap_time_text, position_value, speed_mph, gap_ahead_ms, gap_ahead_laps,
           gap_ahead_display, gap_leader_ms, gap_leader_laps, gap_leader_display,
           rolling_median_ms, is_pit_candidate, is_repair_candidate, is_outlier, is_green_flag,
           search_text
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
             normalized.laps.map((lap) => {
                 const rawRow = rawRows[lap.rowIndex];
@@ -90,9 +90,8 @@ export async function importRace(db, file) {
                     crypto.randomUUID(),
                     raceId,
                     rawRow?.rawRowId ?? null,
-                    `${raceId}:${lap.lapNumber}:${lap.carNumber}:${lap.driverName}:${lap.lapTimeText}`,
+                    `${raceId}:${lap.lapNumber}:${lap.driverName}:${lap.lapTimeText}`,
                     lap.lapNumber,
-                    lap.carNumber,
                     lap.driverName,
                     lap.lapTime.ms,
                     lap.lapTimeText,

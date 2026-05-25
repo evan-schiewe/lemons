@@ -19,22 +19,22 @@ export class SQLiteClient {
         const persistedBytes = await this.loadPersistedBytes();
         this.db = persistedBytes?.length ? new this.SQL.Database(persistedBytes) : new this.SQL.Database();
         this.db.run(schemaSql);
-        this.applyMigrations();
+        this.applyMigrations(this.db);
         await this.persist();
         return this;
     }
 
-    applyMigrations() {
+    applyMigrations(database) {
         // Existing persisted databases need explicit ALTERs for new columns.
-        const raceColumns = this.query('PRAGMA table_info(races)');
+        const raceColumns = this.queryDatabase(database, 'PRAGMA table_info(races)');
         const hasRaceStartTime = raceColumns.some((column) => column.name === 'race_start_time');
         if (!hasRaceStartTime) {
-            this.db.run('ALTER TABLE races ADD COLUMN race_start_time TEXT');
+            database.run('ALTER TABLE races ADD COLUMN race_start_time TEXT');
         }
     }
 
-    query(sql, params = []) {
-        const statement = this.db.prepare(sql);
+    queryDatabase(database, sql, params = []) {
+        const statement = database.prepare(sql);
 
         try {
             statement.bind(params);
@@ -46,6 +46,10 @@ export class SQLiteClient {
         } finally {
             statement.free();
         }
+    }
+
+    query(sql, params = []) {
+        return this.queryDatabase(this.db, sql, params);
     }
 
     queryOne(sql, params = []) {
@@ -85,6 +89,40 @@ export class SQLiteClient {
         return this.db.export();
     }
 
+    async restoreDatabase(bytes) {
+        const incoming = new Uint8Array(bytes);
+        let restoredDatabase = null;
+
+        try {
+            restoredDatabase = new this.SQL.Database(incoming);
+
+            const tables = this.queryDatabase(
+                restoredDatabase,
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('races', 'raw_lap_rows', 'normalized_laps')",
+            );
+            if (tables.length < 3) {
+                throw new Error('Selected file is not a Lemons Race Viewer SQLite export.');
+            }
+
+            restoredDatabase.run(schemaSql);
+            this.applyMigrations(restoredDatabase);
+
+            const previousDb = this.db;
+            this.db = restoredDatabase;
+            await this.persist();
+            this.storageMode = this.storageMode || 'memory';
+
+            if (previousDb) {
+                previousDb.close();
+            }
+        } catch (error) {
+            if (restoredDatabase) {
+                restoredDatabase.close();
+            }
+            throw error;
+        }
+    }
+
     async persist() {
         const bytes = this.db.export();
 
@@ -117,7 +155,7 @@ export class SQLiteClient {
 
         this.db = new this.SQL.Database();
         this.db.run(schemaSql);
-        this.applyMigrations();
+        this.applyMigrations(this.db);
         this.storageMode = 'memory';
     }
 

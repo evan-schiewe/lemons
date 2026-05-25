@@ -17,9 +17,7 @@ export function createLapTimeChart(element, { onSelectLap }) {
     });
 
     return {
-        render(rows, annotations, selectedLapNumber) {
-            const rowsByCar = groupRowsByCar(rows);
-            const isSingleSeries = rowsByCar.length <= 1;
+        render(rows, annotations) {
             const fastestSeconds = rows.reduce((fastest, row) => {
                 if (!Number.isFinite(row.lap_time_ms)) {
                     return fastest;
@@ -38,63 +36,127 @@ export function createLapTimeChart(element, { onSelectLap }) {
                 return Number.isFinite(slowest) ? Math.max(slowest, lapSeconds) : lapSeconds;
             }, Number.NaN);
             const lapTimeAxisMax = getTenMinuteCeilingSeconds(slowestSeconds);
-            const lapSeries = rowsByCar.map(([carNumber, carRows], index) => ({
-                name: formatLapTimeSeriesName(carNumber, isSingleSeries),
+            const lapSeries = [{
+                name: 'Lap Times',
                 type: 'line',
                 smooth: false,
                 showSymbol: false,
                 lineStyle: { width: 2 },
-                itemStyle: { color: PALETTE[index % PALETTE.length] },
+                itemStyle: { color: PALETTE[0] },
                 xAxisIndex: 0,
                 yAxisIndex: 0,
-                data: carRows
+                data: withGaps(rows
                     .filter((row) => Number.isFinite(row.lap_time_ms))
                     .map((row) => ({
                         value: [row.lap_number, row.lap_time_ms / 1000],
                         lapNumber: row.lap_number,
                         outlier: row.is_outlier === 1,
                         driverName: row.driver_name,
-                    })),
-                markLine: index === 0 ? buildLapMarks(selectedLapNumber, annotations.driverStints) : undefined,
-                markArea: index === 0 ? buildRangeAreas(annotations.rangeEvents) : undefined,
-            }));
+                    }))),
+            }];
 
-            const positionSeries = rowsByCar.map(([carNumber, carRows], index) => ({
-                name: formatPositionSeriesName(carNumber, isSingleSeries),
-                type: 'line',
-                smooth: false,
-                showSymbol: false,
-                itemStyle: { color: PALETTE[index % PALETTE.length] },
-                lineStyle: { width: 2 },
+            const stintLaneModel = buildStintLaneModel(annotations.driverStints);
+            const stintSeries = {
+                name: 'Driver Stints',
+                type: 'custom',
                 xAxisIndex: 1,
                 yAxisIndex: 1,
-                data: carRows
-                    .filter((row) => Number.isFinite(row.position_value))
-                    .map((row) => ({ value: [row.lap_number, row.position_value], lapNumber: row.lap_number })),
-                markLine: index === 0 && Number.isFinite(selectedLapNumber)
-                    ? { symbol: 'none', data: [{ xAxis: selectedLapNumber, name: 'Selected Lap' }] }
-                    : undefined,
-                markArea: index === 0
-                    ? {
-                        itemStyle: { opacity: 0.08 },
-                        data: annotations.rangeEvents.map((event) => [
-                            { name: event.title, xAxis: event.start_lap, itemStyle: { color: event.color } },
-                            { xAxis: event.end_lap },
-                        ]),
-                    }
-                    : undefined,
-            }));
+                data: stintLaneModel.stints,
+                renderItem: (params, api) => {
+                    const startLap = api.value(0);
+                    const endLap = api.value(1);
+                    const laneIndex = api.value(2);
+                    const start = api.coord([startLap, laneIndex]);
+                    const end = api.coord([endLap, laneIndex]);
+                    const laneHeight = Math.max(api.size([0, 1])[1] * 0.58, 8);
+                    const rawRect = {
+                        x: Math.min(start[0], end[0]),
+                        y: start[1] - (laneHeight / 2),
+                        width: Math.max(1, Math.abs(end[0] - start[0])),
+                        height: laneHeight,
+                    };
 
-            const gapSeries = rowsByCar.map(([carNumber, carRows], index) => ({
-                name: formatGapSeriesName(carNumber, isSingleSeries),
+                    const clippedRect = echarts.graphic.clipRectByRect(rawRect, {
+                        x: params.coordSys.x,
+                        y: params.coordSys.y,
+                        width: params.coordSys.width,
+                        height: params.coordSys.height,
+                    });
+
+                    if (!clippedRect) {
+                        return null;
+                    }
+
+                    return {
+                        type: 'rect',
+                        shape: clippedRect,
+                        style: api.style({ opacity: 0.88 }),
+                    };
+                },
+                encode: { x: [0, 1], y: 2 },
+                tooltip: {
+                    formatter: (params) => params.data?.label || 'Driver stint',
+                },
+                z: 3,
+            };
+
+            const rangeEventSeries = {
+                name: 'Range Events',
+                type: 'line',
+                showSymbol: false,
+                lineStyle: { opacity: 0 },
+                itemStyle: { opacity: 0 },
+                xAxisIndex: 1,
+                yAxisIndex: 1,
+                data: [],
+                markArea: buildRangeAreas(annotations.rangeEvents),
+                tooltip: { show: false },
+                z: 1,
+            };
+
+            const stintIncidentSeries = buildIncidentScatter(
+                'Incidents',
+                annotations.taggedIncidents,
+                0,
+                '#d94f2b',
+                1,
+                1,
+                'diamond',
+            );
+            const stintNoteSeries = buildIncidentScatter(
+                'Lap Notes',
+                annotations.lapNotes,
+                1,
+                '#f59e0b',
+                1,
+                1,
+                'circle',
+            );
+
+            const positionSeries = [{
+                name: 'Position',
                 type: 'line',
                 smooth: false,
                 showSymbol: false,
-                itemStyle: { color: GAP_PALETTE[index % GAP_PALETTE.length] },
-                lineStyle: { width: 2, type: 'dashed' },
-                xAxisIndex: 1,
+                itemStyle: { color: PALETTE[0] },
+                lineStyle: { width: 2 },
+                xAxisIndex: 2,
                 yAxisIndex: 2,
-                data: carRows
+                data: withGaps(rows
+                    .filter((row) => Number.isFinite(row.position_value))
+                    .map((row) => ({ value: [row.lap_number, row.position_value], lapNumber: row.lap_number }))),
+            }];
+
+            const gapSeries = [{
+                name: 'Gap to Leader',
+                type: 'line',
+                smooth: false,
+                showSymbol: false,
+                itemStyle: { color: GAP_PALETTE[0] },
+                lineStyle: { width: 2, type: 'dashed' },
+                xAxisIndex: 2,
+                yAxisIndex: 3,
+                data: withGaps(rows
                     .filter((row) => Number.isFinite(row.gap_leader_ms) || Number.isFinite(row.gap_leader_laps))
                     .map((row) => {
                         const gapDisplay = formatGapDisplay(row.gap_leader_ms, row.gap_leader_laps);
@@ -109,17 +171,16 @@ export function createLapTimeChart(element, { onSelectLap }) {
                             lapNumber: row.lap_number,
                             gapDisplay,
                         };
-                    }),
-            }));
+                    })),
+            }];
 
-            const maxSeconds = Math.max(
-                ...rows.map((row) => (Number.isFinite(row.lap_time_ms) ? row.lap_time_ms / 1000 : 0)),
-                1,
-            );
-
-            const lapIncidentSeries = buildIncidentScatter('Incidents', annotations.taggedIncidents, maxSeconds * 0.98, '#d94f2b', 0);
-            const lapNoteSeries = buildIncidentScatter('Lap Notes', annotations.lapNotes, maxSeconds * 0.93, '#f59e0b', 0);
-            const topLegendNames = [...lapSeries.map((series) => series.name), lapIncidentSeries.name, lapNoteSeries.name];
+            const topLegendNames = [...lapSeries.map((series) => series.name)];
+            const middleLegendNames = [
+                rangeEventSeries.name,
+                stintSeries.name,
+                stintIncidentSeries.name,
+                stintNoteSeries.name,
+            ];
             const bottomLegendNames = [
                 ...positionSeries.map((series) => series.name),
                 ...gapSeries.map((series) => series.name),
@@ -141,6 +202,9 @@ export function createLapTimeChart(element, { onSelectLap }) {
                             if (item.seriesName.startsWith('Gap to Leader')) {
                                 return `${item.seriesName}: ${item.data?.gapDisplay ?? formatNumber(item.value?.[1])}`;
                             }
+                            if (item.seriesName.startsWith('Driver Stints')) {
+                                return `${item.seriesName}: ${item.data?.label ?? ''}`;
+                            }
                             return `${item.seriesName}: ${item.data?.label ?? ''}`;
                         })
                         .join('<br/>'),
@@ -152,13 +216,19 @@ export function createLapTimeChart(element, { onSelectLap }) {
                     },
                     {
                         left: 'center',
-                        bottom: 68,
+                        top: '43%',
+                        data: middleLegendNames,
+                    },
+                    {
+                        left: 'center',
+                        bottom: 72,
                         data: bottomLegendNames,
                     },
                 ],
                 grid: [
-                    { left: 0, right: 100, top: 40, height: '42%', containLabel: true },
-                    { left: 48, right: 72, top: '58%', height: '18%' },
+                    { left: 56, right: 72, top: 40, height: '33%', containLabel: false },
+                    { left: 56, right: 72, top: '47%', height: '14%', containLabel: false },
+                    { left: 56, right: 72, top: '66%', height: '16%', containLabel: false },
                 ],
                 xAxis: [
                     {
@@ -168,10 +238,15 @@ export function createLapTimeChart(element, { onSelectLap }) {
                     },
                     {
                         type: 'value',
+                        name: '',
+                        gridIndex: 1,
+                    },
+                    {
+                        type: 'value',
                         name: 'Lap',
                         nameLocation: 'middle',
                         nameGap: 18,
-                        gridIndex: 1,
+                        gridIndex: 2,
                     },
                 ],
                 yAxis: [
@@ -187,10 +262,19 @@ export function createLapTimeChart(element, { onSelectLap }) {
                     },
                     {
                         type: 'value',
+                        gridIndex: 1,
+                        min: -0.5,
+                        max: Math.max(stintLaneModel.labels.length - 0.5, 1.5),
+                        interval: 1,
+                        axisLabel: { show: false },
+                        axisTick: { show: false },
+                    },
+                    {
+                        type: 'value',
                         name: 'Position',
                         inverse: true,
                         minInterval: 1,
-                        gridIndex: 1,
+                        gridIndex: 2,
                         nameTextStyle: {
                             padding: [6, 0, 0, 0],
                         },
@@ -200,17 +284,25 @@ export function createLapTimeChart(element, { onSelectLap }) {
                         name: 'Gap to Leader',
                         position: 'right',
                         min: 0,
-                        gridIndex: 1,
+                        gridIndex: 2,
                         axisLabel: {
                             formatter: (value) => formatNumber(value),
                         },
                     },
                 ],
                 dataZoom: [
-                    { type: 'inside', xAxisIndex: [0, 1], zoomOnMouseWheel: false, moveOnMouseWheel: false },
-                    { type: 'slider', bottom: 32, height: 32, xAxisIndex: [0, 1] },
+                    { type: 'inside', xAxisIndex: [0, 1, 2], zoomOnMouseWheel: false, moveOnMouseWheel: false },
+                    { type: 'slider', bottom: 28, height: 32, xAxisIndex: [0, 1, 2] },
                 ],
-                series: [...lapSeries, lapIncidentSeries, lapNoteSeries, ...positionSeries, ...gapSeries],
+                series: [
+                    ...lapSeries,
+                    rangeEventSeries,
+                    stintSeries,
+                    stintIncidentSeries,
+                    stintNoteSeries,
+                    ...positionSeries,
+                    ...gapSeries,
+                ],
             });
         },
         resize() {
@@ -219,44 +311,15 @@ export function createLapTimeChart(element, { onSelectLap }) {
     };
 }
 
-function groupRowsByCar(rows) {
-    const groups = new Map();
-    rows.forEach((row) => {
-        const key = `${row.car_number ?? ''}`.trim();
-        if (!groups.has(key)) {
-            groups.set(key, []);
+function withGaps(points) {
+    const result = [];
+    for (let i = 0; i < points.length; i++) {
+        if (i > 0 && points[i].lapNumber - points[i - 1].lapNumber > 1) {
+            result.push({ value: [points[i].lapNumber - 1, null], lapNumber: points[i].lapNumber - 1 });
         }
-        groups.get(key).push(row);
-    });
-    return [...groups.entries()];
-}
-
-function formatLapTimeSeriesName(carNumber, isSingleSeries) {
-    if (isSingleSeries || !carNumber) {
-        return 'Lap Times';
+        result.push(points[i]);
     }
-    return `Lap Times ${carNumber}`;
-}
-
-function buildLapMarks(selectedLapNumber, driverStints) {
-    const stintLines = driverStints.flatMap((stint) => [
-        {
-            xAxis: stint.start_lap,
-            name: `${stint.driver_name} in`,
-            lineStyle: { color: stint.color, type: 'dashed' },
-        },
-        {
-            xAxis: stint.end_lap,
-            name: `${stint.driver_name} out`,
-            lineStyle: { color: stint.color, type: 'dotted' },
-        },
-    ]);
-
-    const selectedLine = Number.isFinite(selectedLapNumber)
-        ? [{ xAxis: selectedLapNumber, name: 'Selected Lap', lineStyle: { color: '#1f1b16', width: 2 } }]
-        : [];
-
-    return { symbol: 'none', label: { formatter: '{b}' }, data: [...selectedLine, ...stintLines] };
+    return result;
 }
 
 function buildRangeAreas(rangeEvents) {
@@ -269,14 +332,15 @@ function buildRangeAreas(rangeEvents) {
     };
 }
 
-function buildIncidentScatter(name, items, yValue, color) {
+function buildIncidentScatter(name, items, yValue, color, xAxisIndex, yAxisIndex, symbol = 'circle') {
     return {
         name,
         type: 'scatter',
+        symbol,
         symbolSize: 12,
         itemStyle: { color },
-        xAxisIndex: 0,
-        yAxisIndex: 0,
+        xAxisIndex,
+        yAxisIndex,
         data: items.map((item) => ({
             value: [item.lap_number, yValue],
             lapNumber: item.lap_number,
@@ -285,18 +349,61 @@ function buildIncidentScatter(name, items, yValue, color) {
     };
 }
 
-function formatPositionSeriesName(carNumber, isSingleSeries) {
-    if (isSingleSeries || !carNumber) {
-        return 'Position';
-    }
-    return `Position ${carNumber}`;
+function buildStintLaneModel(driverStints) {
+    const sortedStints = driverStints
+        .filter((stint) => Number.isFinite(stint.start_lap) && Number.isFinite(stint.end_lap))
+        .sort((a, b) => {
+            if (a.start_lap !== b.start_lap) {
+                return a.start_lap - b.start_lap;
+            }
+            return a.end_lap - b.end_lap;
+        });
+
+    const laneByDriver = new Map();
+    const orderedDrivers = [];
+    sortedStints.forEach((stint) => {
+        const driverName = (stint.driver_name || 'Unknown driver').trim() || 'Unknown driver';
+        if (!laneByDriver.has(driverName)) {
+            orderedDrivers.push(driverName);
+            laneByDriver.set(driverName, 0);
+        }
+    });
+
+    const driverCount = orderedDrivers.length;
+    orderedDrivers.forEach((driverName, index) => {
+        // Reserve lanes 0 and 1 for incidents/notes; place first driver at top.
+        laneByDriver.set(driverName, (driverCount - index) + 1);
+    });
+
+    const labels = ['Incidents', 'Lap Notes'];
+    laneByDriver.forEach((laneIndex, driverName) => {
+        labels[laneIndex] = driverName;
+    });
+
+    const driverColorByName = new Map();
+    laneByDriver.forEach((laneIndex, driverName) => {
+        driverColorByName.set(driverName, buildDriverLaneColor(laneIndex - 2));
+    });
+
+    const stints = sortedStints.map((stint) => {
+        const driverName = (stint.driver_name || 'Unknown driver').trim() || 'Unknown driver';
+        const laneIndex = laneByDriver.get(driverName) ?? 2;
+        const color = driverColorByName.get(driverName) ?? buildDriverLaneColor(0);
+
+        return {
+            value: [stint.start_lap, stint.end_lap, laneIndex],
+            lapNumber: Math.round((stint.start_lap + stint.end_lap) / 2),
+            label: `${driverName}: L${stint.start_lap} - L${stint.end_lap}`,
+            itemStyle: { color },
+        };
+    });
+
+    return { labels, stints };
 }
 
-function formatGapSeriesName(carNumber, isSingleSeries) {
-    if (isSingleSeries || !carNumber) {
-        return 'Gap to Leader';
-    }
-    return `Gap to Leader ${carNumber}`;
+function buildDriverLaneColor(driverIndex) {
+    const hue = (driverIndex * 137.508) % 360;
+    return `hsl(${hue}, 72%, 46%)`;
 }
 
 function getMinuteFloorSeconds(seconds) {

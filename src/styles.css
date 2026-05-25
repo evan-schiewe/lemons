@@ -177,7 +177,7 @@ h1 {
 }
 
 .sticky-content #lap-time-chart {
-  height: 620px;
+  height: 700px;
 }
 
 .panel,
@@ -270,6 +270,7 @@ textarea {
 
 .table-wrap {
   overflow: auto;
+  max-height: min(70vh, 720px);
 }
 
 table {
@@ -288,15 +289,11 @@ thead th {
   position: sticky;
   top: 0;
   background: rgba(255, 248, 240, 0.96);
+  z-index: 2;
   cursor: pointer;
 }
 
-tbody tr {
-  cursor: pointer;
-}
-
-tbody tr:hover,
-tbody tr.is-selected {
+tbody tr:hover {
   background: rgba(247, 211, 168, 0.28);
 }
 
@@ -366,5 +363,324 @@ tbody tr.is-selected {
 
   .hero-actions {
     justify-content: flex-start;
+  }
+}
+
+/* Annotation Helper Styles */
+
+.helper-empty {
+  padding: 40px 20px;
+  text-align: center;
+  color: #6b5d4d;
+}
+
+.helper-wrapper {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 20px;
+}
+
+.helper-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 20px;
+  align-items: start;
+  padding: 16px 20px;
+  background: linear-gradient(135deg, rgba(255, 250, 244, 0.95), rgba(248, 245, 240, 0.9));
+  border-radius: 16px;
+  border: 1px solid rgba(113, 92, 64, 0.2);
+}
+
+.helper-header-main {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.helper-queue-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: rgba(31, 27, 22, 0.06);
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.helper-index {
+  font-weight: 700;
+  font-size: 1.1rem;
+}
+
+.helper-total {
+  color: #9d8b75;
+}
+
+.helper-unreviewed {
+  margin-left: 8px;
+  padding-left: 8px;
+  border-left: 1px solid rgba(31, 27, 22, 0.2);
+  color: #d97706;
+  font-weight: 600;
+}
+
+.helper-candidate-badge {
+  padding: 6px 10px;
+  border-radius: 8px;
+  border: 2px solid;
+  font-size: 0.8rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.helper-context {
+  display: grid;
+  gap: 6px;
+}
+
+.helper-context-main strong {
+  display: block;
+  font-size: 0.95rem;
+}
+
+.helper-driver {
+  color: #6b5d4d;
+  font-size: 0.88rem;
+}
+
+.helper-metrics {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.helper-metric {
+  color: #6b5d4d;
+}
+
+.helper-status {
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.helper-status-reviewed {
+  background: rgba(16, 185, 129, 0.1);
+  color: #047857;
+}
+
+.helper-status-unreviewed {
+  background: rgba(239, 68, 68, 0.1);
+  color: #c2410c;
+}
+
+.helper-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: rgba(255, 255, 255, 0.5);
+  border-radius: 12px;
+  border: 1px solid rgba(113, 92, 64, 0.1);
+}
+
+.helper-nav-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.helper-nav-btn {
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  min-height: 44px;
+}
+
+.helper-auto-advance {
+  white-space: nowrap;
+}
+
+.helper-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  user-select: none;
+}
+
+.helper-toggle input {
+  width: auto;
+  cursor: pointer;
+}
+
+.helper-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.helper-quick-actions .button {
+  padding: 10px 12px;
+  font-size: 0.9rem;
+  min-height: 44px;
+  text-align: center;
+}
+
+.helper-mark-reviewed {
+  background: rgba(16, 185, 129, 0.12);
+  color: #047857;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+.helper-mark-reviewed:hover {
+  background: rgba(16, 185, 129, 0.18);
+}
+
+.helper-forms-section {
+  border-top: 2px solid rgba(113, 92, 64, 0.1);
+  padding-top: 20px;
+}
+
+.helper-forms-header {
+  margin-bottom: 16px;
+}
+
+.helper-forms-header h3 {
+  margin: 0 0 4px 0;
+  font-size: 1rem;
+}
+
+.helper-forms-hint {
+  color: #9d8b75;
+  font-size: 0.85rem;
+}
+
+.helper-form-section {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 20px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.6);
+  border-radius: 12px;
+  border: 1px solid rgba(113, 92, 64, 0.1);
+}
+
+.helper-form-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 0.95rem;
+  color: #4b4032;
+}
+
+.helper-form-section form {
+  display: grid;
+  gap: 10px;
+}
+
+.helper-form-section label {
+  display: grid;
+  grid-template-columns: 100px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+
+.helper-form-section label span {
+  padding-top: 10px;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.helper-related-annotations {
+  border-top: 2px solid rgba(113, 92, 64, 0.1);
+  padding-top: 16px;
+  margin-top: 20px;
+}
+
+.helper-related-annotations h4 {
+  margin: 0 0 12px 0;
+  font-size: 0.95rem;
+  color: #4b4032;
+}
+
+.helper-annotation-list-section {
+  margin-bottom: 12px;
+}
+
+.helper-annotation-list-section h5 {
+  margin: 0 0 8px 0;
+  font-size: 0.9rem;
+  color: #6b5d4d;
+}
+
+.helper-annotation-list {
+  display: grid;
+  gap: 8px;
+}
+
+.helper-annotation-item {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(245, 238, 229, 0.8);
+  border: 1px solid rgba(113, 92, 64, 0.08);
+}
+
+.helper-annotation-item strong {
+  display: block;
+  font-size: 0.9rem;
+  margin-bottom: 4px;
+}
+
+.helper-annotation-item p {
+  margin: 4px 0;
+  font-size: 0.85rem;
+  color: #4b4032;
+}
+
+.helper-annotation-meta {
+  font-size: 0.8rem;
+  color: #9d8b75;
+  margin-top: 4px;
+}
+
+/* Mobile adjustments for helper */
+@media (max-width: 780px) {
+  .helper-header {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+
+  .helper-controls {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .helper-nav-buttons {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .helper-nav-btn {
+    padding: 10px;
+    font-size: 0.85rem;
+  }
+
+  .helper-quick-actions {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .helper-form-section label {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .helper-form-section label span {
+    padding-top: 0;
   }
 }

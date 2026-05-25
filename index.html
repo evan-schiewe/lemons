@@ -9,18 +9,18 @@
     <div id="app">
       <header class="hero">
         <div>
-          <p class="eyebrow">Lemons Analytics</p>
           <h1>Race Viewer</h1>
           <p class="hero-copy">
-            Import lap CSVs, normalize malformed timing rows, and review race pace,
-            positions, gaps, and annotations from a browser-local SQLite database.
+            Witness the citrus
           </p>
         </div>
         <div class="hero-actions">
           <label class="button primary" for="csv-input">Import CSV</label>
           <input id="csv-input" type="file" accept=".csv,text/csv" multiple hidden />
           <button id="export-json" class="button secondary" type="button">Export JSON</button>
-          <button id="export-sqlite" class="button ghost" type="button">Export SQLite</button>
+          <button id="export-sqlite" class="button secondary" type="button">Export SQLite</button>
+          <label class="button ghost" for="sqlite-input">Restore SQLite</label>
+          <input id="sqlite-input" type="file" accept=".sqlite,.db,application/x-sqlite3,application/vnd.sqlite3" hidden />
         </div>
       </header>
 
@@ -44,10 +44,11 @@
             <div id="annotations-tab" class="tab-content">
               <section class="panel chart-panel sticky-content">
                 <div class="panel-header">
-                  <h2>Annotations</h2>
-                  <span class="panel-subtitle">Notes, incidents, events, stints</span>
+                  <h2>Annotation Helper</h2>
+                  <span class="panel-subtitle">Review candidates: pit, repair, outlier</span>
                 </div>
-                <div id="annotation-panel"></div>
+                <!-- Primary annotation helper container -->
+                <div id="annotation-helper-container" class="annotation-helper"></div>
               </section>
             </div>
           </div>
@@ -71,7 +72,7 @@
             </label>
             <label>
               <span>Search</span>
-              <input id="search-filter" type="search" placeholder="Car, note, incident" />
+              <input id="search-filter" type="search" placeholder="Driver, note, incident" />
             </label>
             <label>
               <span>Lap Range</span>
@@ -93,7 +94,6 @@
         <section class="panel table-panel">
           <div class="panel-header">
             <h2>Lap Table</h2>
-            <span id="selected-lap" class="panel-subtitle">No lap selected</span>
           </div>
           <div class="table-wrap">
             <table>

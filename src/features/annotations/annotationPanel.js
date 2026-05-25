@@ -1,65 +1,65 @@
 import { escapeHtml } from '../../utils/format.js';
 
 const KIND_CONFIG = {
-    lapNote: { formId: 'lap-note-form', title: 'Lap Note', listKey: 'lapNotes' },
-    taggedIncident: { formId: 'tagged-incident-form', title: 'Tagged Incident', listKey: 'taggedIncidents' },
-    rangeEvent: { formId: 'range-event-form', title: 'Range Event', listKey: 'rangeEvents' },
-    driverStint: { formId: 'driver-stint-form', title: 'Driver Stint', listKey: 'driverStints' },
+  lapNote: { formId: 'lap-note-form', title: 'Lap Note', listKey: 'lapNotes' },
+  taggedIncident: { formId: 'tagged-incident-form', title: 'Tagged Incident', listKey: 'taggedIncidents' },
+  rangeEvent: { formId: 'range-event-form', title: 'Range Event', listKey: 'rangeEvents' },
+  driverStint: { formId: 'driver-stint-form', title: 'Driver Stint', listKey: 'driverStints' },
 };
 
 export function mountAnnotationPanel(container, handlers) {
-    const state = { viewModel: null };
+  const state = { viewModel: null };
 
-    container.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const form = event.target.closest('form[data-kind]');
-        if (!form) {
-            return;
-        }
+  container.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    const form = event.target.closest('form[data-kind]');
+    if (!form) {
+      return;
+    }
 
-        const formData = new FormData(form);
-        const kind = form.dataset.kind;
-        await handlers.onSave(kind, normalizeFormData(kind, formData));
-    });
+    const formData = new FormData(form);
+    const kind = form.dataset.kind;
+    await handlers.onSave(kind, normalizeFormData(kind, formData));
+  });
 
-    container.addEventListener('click', async (event) => {
-        const button = event.target.closest('button[data-action]');
-        if (!button) {
-            return;
-        }
+  container.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) {
+      return;
+    }
 
-        const action = button.dataset.action;
-        const kind = button.dataset.kind;
+    const action = button.dataset.action;
+    const kind = button.dataset.kind;
 
-        if (action === 'delete') {
-            await handlers.onDelete(kind, button.dataset.id);
-            return;
-        }
+    if (action === 'delete') {
+      await handlers.onDelete(kind, button.dataset.id);
+      return;
+    }
 
-        if (action === 'edit') {
-            hydrateForm(container.querySelector(`form[data-kind="${kind}"]`), findItem(state.viewModel, kind, button.dataset.id));
-            return;
-        }
+    if (action === 'edit') {
+      hydrateForm(container.querySelector(`form[data-kind="${kind}"]`), findItem(state.viewModel, kind, button.dataset.id));
+      return;
+    }
 
-        if (action === 'clear') {
-            hydrateForm(container.querySelector(`form[data-kind="${kind}"]`), null, state.viewModel?.selectedLapRow);
-        }
-    });
+    if (action === 'clear') {
+      hydrateForm(container.querySelector(`form[data-kind="${kind}"]`), null, state.viewModel?.selectedLapRow);
+    }
+  });
 
-    return {
-        render(viewModel) {
-            state.viewModel = viewModel;
-            container.innerHTML = renderPanel(viewModel);
-        },
-    };
+  return {
+    render(viewModel) {
+      state.viewModel = viewModel;
+      container.innerHTML = renderPanel(viewModel);
+    },
+  };
 }
 
 function renderPanel(viewModel) {
-    const selected = viewModel.selectedLapRow;
+  const selected = viewModel.selectedLapRow;
 
-    return `
+  return `
     <section class="annotation-section">
-      <strong>${selected ? `Lap ${escapeHtml(selected.lap_number)} · Car ${escapeHtml(selected.car_number)}` : 'No selected lap'}</strong>
+      <strong>${selected ? `Lap ${escapeHtml(selected.lap_number)}` : 'No selected lap'}</strong>
       <p class="annotation-meta">${selected ? escapeHtml(selected.driver_name || 'Unknown driver') : 'Select a lap in the table or charts to prefill forms.'}</p>
     </section>
     ${renderLapNoteForm(selected)}
@@ -74,13 +74,12 @@ function renderPanel(viewModel) {
 }
 
 function renderLapNoteForm(selected) {
-    return `
+  return `
     <section class="annotation-section">
       <h3>Lap Note</h3>
       <form id="lap-note-form" data-kind="lapNote">
         <input type="hidden" name="id" />
         <label><span>Lap</span><input name="lap_number" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
-        <label><span>Car</span><input name="car_number" value="${escapeHtml(selected?.car_number ?? '')}" /></label>
         <label><span>Driver</span><input name="driver_name" value="${escapeHtml(selected?.driver_name ?? '')}" /></label>
         <label><span>Note</span><textarea name="note_text" rows="3" required></textarea></label>
         <label><span>Color</span><input name="color" type="color" value="#f59e0b" /></label>
@@ -94,7 +93,7 @@ function renderLapNoteForm(selected) {
 }
 
 function renderIncidentForm(selected) {
-    return `
+  return `
     <section class="annotation-section">
       <h3>Tagged Incident</h3>
       <form id="tagged-incident-form" data-kind="taggedIncident">
@@ -114,7 +113,7 @@ function renderIncidentForm(selected) {
 }
 
 function renderRangeEventForm(selected) {
-    return `
+  return `
     <section class="annotation-section">
       <h3>Range Event</h3>
       <form id="range-event-form" data-kind="rangeEvent">
@@ -135,13 +134,12 @@ function renderRangeEventForm(selected) {
 }
 
 function renderDriverStintForm(selected) {
-    return `
+  return `
     <section class="annotation-section">
       <h3>Driver Stint</h3>
       <form id="driver-stint-form" data-kind="driverStint">
         <input type="hidden" name="id" />
         <label><span>Driver</span><input name="driver_name" value="${escapeHtml(selected?.driver_name ?? '')}" required /></label>
-        <label><span>Car</span><input name="car_number" value="${escapeHtml(selected?.car_number ?? '')}" /></label>
         <label><span>Start Lap</span><input name="start_lap" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
         <label><span>End Lap</span><input name="end_lap" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
         <label><span>Notes</span><textarea name="notes" rows="2"></textarea></label>
@@ -156,7 +154,7 @@ function renderDriverStintForm(selected) {
 }
 
 function renderListSection(title, kind, items, renderItem) {
-    return `
+  return `
     <section class="annotation-section">
       <div class="panel-header">
         <h3>${escapeHtml(title)}</h3>
@@ -170,9 +168,9 @@ function renderListSection(title, kind, items, renderItem) {
 }
 
 function renderLapNoteItem(item, kind) {
-    return `
+  return `
     <article class="annotation-item">
-      <strong>Lap ${escapeHtml(item.lap_number)} · ${escapeHtml(item.car_number || '-')}</strong>
+  <strong>Lap ${escapeHtml(item.lap_number)}</strong>
       <p>${escapeHtml(item.note_text)}</p>
       <div class="annotation-meta">${escapeHtml(item.driver_name || 'No driver')}</div>
       ${renderItemActions(kind, item.id)}
@@ -181,7 +179,7 @@ function renderLapNoteItem(item, kind) {
 }
 
 function renderTaggedIncidentItem(item, kind) {
-    return `
+  return `
     <article class="annotation-item">
       <strong>Lap ${escapeHtml(item.lap_number)} · ${escapeHtml(item.tag)}</strong>
       <p>${escapeHtml(item.title)}</p>
@@ -192,7 +190,7 @@ function renderTaggedIncidentItem(item, kind) {
 }
 
 function renderRangeEventItem(item, kind) {
-    return `
+  return `
     <article class="annotation-item">
       <strong>Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)} · ${escapeHtml(item.tag)}</strong>
       <p>${escapeHtml(item.title)}</p>
@@ -203,18 +201,17 @@ function renderRangeEventItem(item, kind) {
 }
 
 function renderDriverStintItem(item, kind) {
-    return `
+  return `
     <article class="annotation-item">
       <strong>${escapeHtml(item.driver_name)} · Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)}</strong>
       <p>${escapeHtml(item.notes || 'No stint notes')}</p>
-      <div class="annotation-meta">Car ${escapeHtml(item.car_number || '-')}</div>
       ${renderItemActions(kind, item.id)}
     </article>
   `;
 }
 
 function renderItemActions(kind, id) {
-    return `
+  return `
     <div class="form-actions">
       <button class="button ghost" data-action="edit" data-kind="${kind}" data-id="${id}" type="button">Edit</button>
       <button class="button ghost" data-action="delete" data-kind="${kind}" data-id="${id}" type="button">Delete</button>
@@ -223,66 +220,65 @@ function renderItemActions(kind, id) {
 }
 
 function normalizeFormData(kind, formData) {
-    const common = Object.fromEntries(formData.entries());
-    const numericFields = {
-        lapNote: ['lap_number'],
-        taggedIncident: ['lap_number'],
-        rangeEvent: ['start_lap', 'end_lap'],
-        driverStint: ['start_lap', 'end_lap'],
-    }[kind] || [];
+  const common = Object.fromEntries(formData.entries());
+  const numericFields = {
+    lapNote: ['lap_number'],
+    taggedIncident: ['lap_number'],
+    rangeEvent: ['start_lap', 'end_lap'],
+    driverStint: ['start_lap', 'end_lap'],
+  }[kind] || [];
 
-    numericFields.forEach((field) => {
-        common[field] = Number.parseInt(common[field], 10);
-    });
+  numericFields.forEach((field) => {
+    common[field] = Number.parseInt(common[field], 10);
+  });
 
-    if (!common.id) {
-        delete common.id;
-    }
+  if (!common.id) {
+    delete common.id;
+  }
 
-    return common;
+  return common;
 }
 
 function findItem(viewModel, kind, id) {
-    if (!viewModel) {
-        return null;
-    }
+  if (!viewModel) {
+    return null;
+  }
 
-    const listKey = KIND_CONFIG[kind].listKey;
-    return viewModel.annotations[listKey].find((item) => item.id === id) ?? null;
+  const listKey = KIND_CONFIG[kind].listKey;
+  return viewModel.annotations[listKey].find((item) => item.id === id) ?? null;
 }
 
 function hydrateForm(form, item, selectedLapRow) {
-    if (!form) {
-        return;
+  if (!form) {
+    return;
+  }
+
+  form.reset();
+
+  const defaults = item ?? buildDefaultValues(form.dataset.kind, selectedLapRow);
+  Object.entries(defaults).forEach(([key, value]) => {
+    const field = form.elements.namedItem(key);
+    if (field) {
+      field.value = value ?? '';
     }
-
-    form.reset();
-
-    const defaults = item ?? buildDefaultValues(form.dataset.kind, selectedLapRow);
-    Object.entries(defaults).forEach(([key, value]) => {
-        const field = form.elements.namedItem(key);
-        if (field) {
-            field.value = value ?? '';
-        }
-    });
+  });
 }
 
 function buildDefaultValues(kind, selectedLapRow) {
-    if (!selectedLapRow) {
-        return {};
-    }
+  if (!selectedLapRow) {
+    return {};
+  }
 
-    return {
-        lap_number: selectedLapRow.lap_number,
-        start_lap: selectedLapRow.lap_number,
-        end_lap: selectedLapRow.lap_number,
-        car_number: selectedLapRow.car_number,
-        driver_name: selectedLapRow.driver_name,
-        color: {
-            lapNote: '#f59e0b',
-            taggedIncident: '#d94f2b',
-            rangeEvent: '#2563eb',
-            driverStint: '#059669',
-        }[kind],
-    };
+  return {
+    lap_number: selectedLapRow.lap_number,
+    start_lap: selectedLapRow.lap_number,
+    end_lap: selectedLapRow.lap_number,
+    driver_name: selectedLapRow.driver_name,
+    color: {
+      lapNote: '#f59e0b',
+      taggedIncident: '#d94f2b',
+      rangeEvent: '#2563eb',
+      driverStint: '#059669',
+    }[kind],
+  };
 }

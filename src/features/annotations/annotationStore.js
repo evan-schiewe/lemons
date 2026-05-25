@@ -1,7 +1,7 @@
 const TABLE_CONFIG = {
     lapNote: {
         table: 'lap_notes',
-        fields: ['race_id', 'lap_number', 'car_number', 'driver_name', 'note_text', 'color', 'created_at', 'updated_at'],
+        fields: ['race_id', 'lap_number', 'driver_name', 'note_text', 'color', 'created_at', 'updated_at'],
     },
     taggedIncident: {
         table: 'tagged_incidents',
@@ -13,7 +13,7 @@ const TABLE_CONFIG = {
     },
     driverStint: {
         table: 'driver_stints',
-        fields: ['race_id', 'driver_name', 'car_number', 'start_lap', 'end_lap', 'color', 'notes', 'created_at', 'updated_at'],
+        fields: ['race_id', 'driver_name', 'start_lap', 'end_lap', 'color', 'notes', 'created_at', 'updated_at'],
     },
 };
 

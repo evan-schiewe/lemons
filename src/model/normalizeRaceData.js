@@ -11,13 +11,10 @@ export function normalizeRaceData(parsedRows) {
         const isOutlier = Number.isFinite(lapTimeMs)
             && Number.isFinite(rollingMedianMs)
             && lapTimeMs > rollingMedianMs * 1.3;
-        const isPitCandidate = Number.isFinite(lapTimeMs)
-            && Number.isFinite(rollingMedianMs)
-            && lapTimeMs > rollingMedianMs * 1.55;
-        const isRepairCandidate = Number.isFinite(lapTimeMs)
-            && Number.isFinite(rollingMedianMs)
-            && lapTimeMs > Math.max(rollingMedianMs * 1.85, rollingMedianMs + 120000);
-        const isGreenFlag = Number.isFinite(lapTimeMs) && !isOutlier && !isPitCandidate && !isRepairCandidate;
+        // Pit/repair flags are user-reviewed/manual, so import does not auto-apply them.
+        const isPitCandidate = false;
+        const isRepairCandidate = false;
+        const isGreenFlag = Number.isFinite(lapTimeMs) && !isOutlier;
 
         return {
             ...row,
@@ -27,7 +24,6 @@ export function normalizeRaceData(parsedRows) {
             isRepairCandidate,
             isGreenFlag,
             searchText: [
-                row.carNumber,
                 row.driverName,
                 row.gapAhead.display,
                 row.gapLeader.display,
@@ -41,7 +37,6 @@ export function normalizeRaceData(parsedRows) {
         laps,
         stats: {
             drivers: [...new Set(laps.map((lap) => lap.driverName).filter(Boolean))].sort(),
-            cars: [...new Set(laps.map((lap) => lap.carNumber).filter(Boolean))].sort(),
             totalLaps: laps.length,
             minLap: Math.min(...laps.map((lap) => lap.lapNumber)),
             maxLap: Math.max(...laps.map((lap) => lap.lapNumber)),
@@ -61,7 +56,6 @@ function normalizeRow(row) {
         rawLine: row.rawLine,
         rawCells: row.rawCells,
         lapNumber: parseInteger(row.values.lap),
-        carNumber: row.values.car.trim(),
         driverName: row.values.driver.trim(),
         lapTime,
         lapTimeText: row.values.lap_time.trim(),
@@ -83,32 +77,23 @@ function normalizeRow(row) {
 
 function buildRollingMedians(rows) {
     const medians = new Array(rows.length).fill(null);
-    const rowsByCar = rows.reduce((groups, row, index) => {
-        const key = row.carNumber || 'unknown';
-        if (!groups.has(key)) {
-            groups.set(key, []);
+    const ordered = rows
+        .map((row, index) => ({ row, index }))
+        .sort((left, right) => left.row.lapNumber - right.row.lapNumber);
+
+    ordered.forEach((entry, orderedIndex) => {
+        const sample = ordered
+            .slice(Math.max(0, orderedIndex - 2), Math.min(ordered.length, orderedIndex + 3))
+            .filter((candidate) => candidate !== entry)
+            .map((candidate) => candidate.row.lapTime.ms)
+            .filter((value) => Number.isFinite(value));
+
+        if (!sample.length && Number.isFinite(entry.row.lapTime.ms)) {
+            sample.push(entry.row.lapTime.ms);
         }
-        groups.get(key).push({ row, index });
-        return groups;
-    }, new Map());
 
-    for (const group of rowsByCar.values()) {
-        group.sort((left, right) => left.row.lapNumber - right.row.lapNumber);
-
-        group.forEach((entry, groupIndex) => {
-            const sample = group
-                .slice(Math.max(0, groupIndex - 2), Math.min(group.length, groupIndex + 3))
-                .filter((candidate) => candidate !== entry)
-                .map((candidate) => candidate.row.lapTime.ms)
-                .filter((value) => Number.isFinite(value));
-
-            if (!sample.length && Number.isFinite(entry.row.lapTime.ms)) {
-                sample.push(entry.row.lapTime.ms);
-            }
-
-            medians[entry.index] = computeMedian(sample);
-        });
-    }
+        medians[entry.index] = computeMedian(sample);
+    });
 
     return medians;
 }

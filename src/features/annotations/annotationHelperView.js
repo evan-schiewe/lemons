@@ -1,0 +1,513 @@
+import { escapeHtml } from '../../utils/format.js';
+import { formatLapTimeHHMMSS, formatWallClock } from '../../utils/time.js';
+
+/**
+ * Annotation Helper View Controller
+ * 
+ * Renders and manages the guided annotation helper workflow:
+ * - Candidate queue with one-at-a-time navigation
+ * - Quick actions (incident, event, stint, reviewed/no-action)
+ * - Embedded advanced forms for full edits
+ * - Auto-advance toggle and state persistence
+ */
+
+const KIND_CONFIG = {
+    lapNote: { formId: 'helper-lap-note-form', title: 'Lap Note', listKey: 'lapNotes' },
+    taggedIncident: { formId: 'helper-tagged-incident-form', title: 'Tagged Incident', listKey: 'taggedIncidents' },
+    rangeEvent: { formId: 'helper-range-event-form', title: 'Range Event', listKey: 'rangeEvents' },
+    driverStint: { formId: 'helper-driver-stint-form', title: 'Driver Stint', listKey: 'driverStints' },
+};
+
+export function mountAnnotationHelper(container, handlers) {
+    const state = { viewModel: null };
+
+    // Delegation for form submissions
+    container.addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.target.closest('form[data-kind]');
+        if (!form) {
+            return;
+        }
+
+        const formData = new FormData(form);
+        const kind = form.dataset.kind;
+        await handlers.onSave(kind, normalizeFormData(kind, formData));
+    });
+
+    // Delegation for button actions (delete, edit, clear, quick actions)
+    container.addEventListener('click', async (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) {
+            return;
+        }
+
+        const action = button.dataset.action;
+        const kind = button.dataset.kind;
+
+        if (action === 'delete') {
+            await handlers.onDelete(kind, button.dataset.id);
+            return;
+        }
+
+        if (action === 'edit') {
+            hydrateForm(container.querySelector(`form[data-kind="${kind}"]`), findItem(state.viewModel, kind, button.dataset.id));
+            return;
+        }
+
+        if (action === 'clear') {
+            hydrateForm(container.querySelector(`form[data-kind="${kind}"]`), null, state.viewModel?.selectedLapRow);
+            return;
+        }
+
+        // Quick actions for helper workflow
+        if (action === 'prev-candidate') {
+            handlers.onNavigate('prev');
+            return;
+        }
+
+        if (action === 'next-candidate') {
+            handlers.onNavigate('next');
+            return;
+        }
+
+        if (action === 'jump-unresolved') {
+            handlers.onNavigate('jump-unresolved');
+            return;
+        }
+
+        if (action === 'toggle-auto-advance') {
+            handlers.onToggleAutoAdvance();
+            return;
+        }
+
+        if (action === 'quick-incident') {
+            const form = container.querySelector('form[data-kind="taggedIncident"]');
+            hydrateForm(form, null, state.viewModel?.selectedLapRow);
+            form?.scrollIntoView({ behavior: 'smooth' });
+            return;
+        }
+
+        if (action === 'quick-range-event') {
+            const form = container.querySelector('form[data-kind="rangeEvent"]');
+            hydrateForm(form, null, state.viewModel?.selectedLapRow);
+            form?.scrollIntoView({ behavior: 'smooth' });
+            return;
+        }
+
+        if (action === 'quick-stint-start') {
+            const form = container.querySelector('form[data-kind="driverStint"]');
+            const selected = state.viewModel?.selectedLapRow;
+            if (selected) {
+                hydrateForm(form, null, { ...selected, start_lap: selected.lap_number });
+            }
+            form?.scrollIntoView({ behavior: 'smooth' });
+            return;
+        }
+
+        if (action === 'quick-stint-end') {
+            const form = container.querySelector('form[data-kind="driverStint"]');
+            const selected = state.viewModel?.selectedLapRow;
+            if (selected) {
+                hydrateForm(form, null, { ...selected, end_lap: selected.lap_number });
+            }
+            form?.scrollIntoView({ behavior: 'smooth' });
+            return;
+        }
+
+        if (action === 'mark-reviewed') {
+            // Quick action: create a REVIEWED_NO_ACTION lap note
+            const selected = state.viewModel?.selectedLapRow;
+            if (selected) {
+                await handlers.onSave('lapNote', {
+                    lap_number: selected.lap_number,
+                    driver_name: selected.driver_name,
+                    note_text: 'REVIEWED_NO_ACTION',
+                    color: '#10b981',
+                });
+            }
+            return;
+        }
+    });
+
+    return {
+        render(viewModel) {
+            state.viewModel = viewModel;
+            if (!viewModel) {
+                container.innerHTML = '<div class="helper-empty">No race loaded</div>';
+                return;
+            }
+
+            container.innerHTML = renderHelper(viewModel);
+        },
+    };
+}
+
+function renderHelper(viewModel) {
+    const { candidates, currentIndex, selectedLapRow, annotations, autoAdvance, raceStartTime } = viewModel;
+
+    if (!candidates || candidates.length === 0) {
+        return '<div class="helper-empty"><p>No candidates found. All laps reviewed!</p></div>';
+    }
+
+    const currentCandidate = candidates[currentIndex] || candidates[0];
+    const unreviewed = candidates.filter((c) => !c.isReviewed).length;
+
+    return `
+    <div class="helper-wrapper">
+      ${renderQueueHeader(currentCandidate, currentIndex, candidates.length, unreviewed, raceStartTime)}
+      ${renderNavigationControls(currentIndex, candidates.length, autoAdvance, unreviewed)}
+      ${renderQuickActions(currentCandidate, selectedLapRow)}
+      ${renderEmbeddedForms(selectedLapRow || currentCandidate)}
+      ${renderRelatedAnnotations(currentCandidate, annotations)}
+    </div>
+  `;
+}
+
+function renderQueueHeader(candidate, index, total, unreviewed, raceStartTime) {
+    const statusClass = candidate.isReviewed ? 'helper-status-reviewed' : 'helper-status-unreviewed';
+    const typeColor = {
+        repair: '#7c3aed',
+        pit: '#f59e0b',
+        outlier: '#3b82f6',
+    }[candidate.candidate_type] || '#999';
+
+    const contextLabel = `Lap ${escapeHtml(candidate.lap_number)}`;
+    const driverLabel = escapeHtml(candidate.driver_name || 'Unknown driver');
+    const lapTimeMs = formatLapTimeHHMMSS(candidate.lap_time_ms);
+    const wallClockTime = formatWallClock(raceStartTime, candidate.lap_start_offset_ms);
+
+    return `
+    <div class="helper-header">
+      <div class="helper-header-main">
+        <div class="helper-queue-badge">
+          <span class="helper-index">${index + 1}</span>
+          <span class="helper-total">of ${total}</span>
+          <span class="helper-unreviewed">${unreviewed} unreviewed</span>
+        </div>
+        <div class="helper-candidate-badge" style="border-color: ${typeColor}">
+          ${escapeHtml(candidate.candidate_type.toUpperCase())}
+        </div>
+      </div>
+      <div class="helper-context">
+        <div class="helper-context-main">
+          <strong>${contextLabel}</strong>
+          <span class="helper-driver">${driverLabel}</span>
+        </div>
+        <div class="helper-metrics">
+          <span class="helper-metric">Lap Time: ${lapTimeMs}</span>
+          <span class="helper-metric">Time of Day: ${wallClockTime}</span>
+          <span class="helper-metric">Position: ${candidate.position_value ?? '—'}</span>
+          <span class="helper-metric">Gap: ${candidate.gap_leader_display || '—'}</span>
+        </div>
+      </div>
+      <div class="helper-status ${statusClass}">
+        ${candidate.isReviewed ? '✓ Reviewed' : '⊘ Unreviewed'}
+      </div>
+    </div>
+  `;
+}
+
+function renderNavigationControls(currentIndex, total, autoAdvance, unreviewed) {
+    const canGoBack = currentIndex > 0;
+    const canGoNext = currentIndex < total - 1;
+    const hasUnreviewed = unreviewed > 0;
+
+    return `
+    <div class="helper-controls">
+      <div class="helper-nav-buttons">
+        <button
+          class="button ghost helper-nav-btn"
+          data-action="prev-candidate"
+          ${!canGoBack ? 'disabled' : ''}
+          type="button"
+        >
+          ← Previous
+        </button>
+        <button
+          class="button ghost helper-nav-btn"
+          data-action="next-candidate"
+          ${!canGoNext ? 'disabled' : ''}
+          type="button"
+        >
+          Next →
+        </button>
+        <button
+          class="button ghost helper-nav-btn"
+          data-action="jump-unresolved"
+          ${!hasUnreviewed ? 'disabled' : ''}
+          type="button"
+        >
+          Jump to First Unreviewed
+        </button>
+      </div>
+      <div class="helper-auto-advance">
+        <label class="helper-toggle">
+          <input
+            type="checkbox"
+            data-action="toggle-auto-advance"
+            ${autoAdvance ? 'checked' : ''}
+          />
+          <span>Auto-advance on save</span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
+function renderQuickActions(candidate, selectedLapRow) {
+    const selected = selectedLapRow || candidate;
+
+    return `
+    <div class="helper-quick-actions">
+      <button class="button secondary" data-action="quick-incident" type="button">
+        + Incident
+      </button>
+      <button class="button secondary" data-action="quick-range-event" type="button">
+        + Range Event
+      </button>
+      <button class="button secondary" data-action="quick-stint-start" type="button">
+        ⊢ Start Stint
+      </button>
+      <button class="button secondary" data-action="quick-stint-end" type="button">
+        ⊣ End Stint
+      </button>
+      <button class="button ghost helper-mark-reviewed" data-action="mark-reviewed" type="button">
+        ✓ Mark Reviewed (No Action)
+      </button>
+    </div>
+  `;
+}
+
+function renderEmbeddedForms(selected) {
+    return `
+    <div class="helper-forms-section">
+      <div class="helper-forms-header">
+        <h3>Advanced Forms</h3>
+        <span class="helper-forms-hint">Or create detailed annotations below</span>
+      </div>
+      ${renderLapNoteForm(selected)}
+      ${renderIncidentForm(selected)}
+      ${renderRangeEventForm(selected)}
+      ${renderDriverStintForm(selected)}
+    </div>
+  `;
+}
+
+function renderLapNoteForm(selected) {
+    return `
+    <section class="helper-form-section">
+      <h4>Lap Note</h4>
+      <form id="helper-lap-note-form" data-kind="lapNote">
+        <input type="hidden" name="id" />
+        <label><span>Lap</span><input name="lap_number" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
+        <label><span>Driver</span><input name="driver_name" value="${escapeHtml(selected?.driver_name ?? '')}" /></label>
+        <label><span>Note</span><textarea name="note_text" rows="2" required></textarea></label>
+        <label><span>Color</span><input name="color" type="color" value="#f59e0b" /></label>
+        <div class="form-actions">
+          <button class="button primary" type="submit">Save Lap Note</button>
+          <button class="button ghost" data-action="clear" data-kind="lapNote" type="button">Clear</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderIncidentForm(selected) {
+    return `
+    <section class="helper-form-section">
+      <h4>Tagged Incident</h4>
+      <form id="helper-tagged-incident-form" data-kind="taggedIncident">
+        <input type="hidden" name="id" />
+        <label><span>Lap</span><input name="lap_number" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
+        <label><span>Title</span><input name="title" required /></label>
+        <label><span>Tag</span><input name="tag" placeholder="Spin, contact, FCY" required /></label>
+        <label><span>Details</span><textarea name="details" rows="2"></textarea></label>
+        <label><span>Color</span><input name="color" type="color" value="#d94f2b" /></label>
+        <div class="form-actions">
+          <button class="button primary" type="submit">Save Incident</button>
+          <button class="button ghost" data-action="clear" data-kind="taggedIncident" type="button">Clear</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderRangeEventForm(selected) {
+    return `
+    <section class="helper-form-section">
+      <h4>Range Event</h4>
+      <form id="helper-range-event-form" data-kind="rangeEvent">
+        <input type="hidden" name="id" />
+        <label><span>Start Lap</span><input name="start_lap" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
+        <label><span>End Lap</span><input name="end_lap" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
+        <label><span>Title</span><input name="title" required /></label>
+        <label><span>Tag</span><input name="tag" placeholder="FCY, caution, weather" required /></label>
+        <label><span>Details</span><textarea name="details" rows="2"></textarea></label>
+        <label><span>Color</span><input name="color" type="color" value="#2563eb" /></label>
+        <div class="form-actions">
+          <button class="button primary" type="submit">Save Range</button>
+          <button class="button ghost" data-action="clear" data-kind="rangeEvent" type="button">Clear</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderDriverStintForm(selected) {
+    return `
+    <section class="helper-form-section">
+      <h4>Driver Stint</h4>
+      <form id="helper-driver-stint-form" data-kind="driverStint">
+        <input type="hidden" name="id" />
+        <label><span>Driver</span><input name="driver_name" value="${escapeHtml(selected?.driver_name ?? '')}" required /></label>
+        <label><span>Start Lap</span><input name="start_lap" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
+        <label><span>End Lap</span><input name="end_lap" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
+        <label><span>Notes</span><textarea name="notes" rows="2"></textarea></label>
+        <label><span>Color</span><input name="color" type="color" value="#059669" /></label>
+        <div class="form-actions">
+          <button class="button primary" type="submit">Save Stint</button>
+          <button class="button ghost" data-action="clear" data-kind="driverStint" type="button">Clear</button>
+        </div>
+      </form>
+    </section>
+  `;
+}
+
+function renderRelatedAnnotations(candidate, annotations) {
+    const relatedNotes = annotations.lapNotes.filter((n) => n.lap_number === candidate.lap_number);
+    const relatedIncidents = annotations.taggedIncidents.filter((i) => i.lap_number === candidate.lap_number);
+    const relatedRanges = annotations.rangeEvents.filter(
+        (e) => e.start_lap <= candidate.lap_number && candidate.lap_number <= e.end_lap,
+    );
+
+    const total = relatedNotes.length + relatedIncidents.length + relatedRanges.length;
+    if (total === 0) {
+        return '';
+    }
+
+    return `
+    <div class="helper-related-annotations">
+      <h4>Related Annotations (${total})</h4>
+      ${relatedNotes.length ? renderListSection('Notes', 'lapNote', relatedNotes, renderLapNoteItem) : ''}
+      ${relatedIncidents.length ? renderListSection('Incidents', 'taggedIncident', relatedIncidents, renderTaggedIncidentItem) : ''}
+      ${relatedRanges.length ? renderListSection('Range Events', 'rangeEvent', relatedRanges, renderRangeEventItem) : ''}
+    </div>
+  `;
+}
+
+function renderListSection(title, kind, items, renderItem) {
+    return `
+    <section class="helper-annotation-list-section">
+      <h5>${escapeHtml(title)}</h5>
+      <div class="helper-annotation-list">
+        ${items.map((item) => renderItem(item, kind)).join('')}
+      </div>
+    </section>
+  `;
+}
+
+function renderLapNoteItem(item, kind) {
+    return `
+    <article class="helper-annotation-item">
+      <strong>Lap ${escapeHtml(item.lap_number)}</strong>
+      <p>${escapeHtml(item.note_text)}</p>
+      <div class="helper-annotation-meta">${escapeHtml(item.driver_name || 'No driver')}</div>
+      ${renderItemActions(kind, item.id)}
+    </article>
+  `;
+}
+
+function renderTaggedIncidentItem(item, kind) {
+    return `
+    <article class="helper-annotation-item">
+      <strong>Lap ${escapeHtml(item.lap_number)} · ${escapeHtml(item.tag)}</strong>
+      <p>${escapeHtml(item.title)}</p>
+      <div class="helper-annotation-meta">${escapeHtml(item.details || '')}</div>
+      ${renderItemActions(kind, item.id)}
+    </article>
+  `;
+}
+
+function renderRangeEventItem(item, kind) {
+    return `
+    <article class="helper-annotation-item">
+      <strong>Laps ${escapeHtml(item.start_lap)}–${escapeHtml(item.end_lap)}</strong>
+      <p>${escapeHtml(item.title)}</p>
+      <div class="helper-annotation-meta">${escapeHtml(item.details || '')}</div>
+      ${renderItemActions(kind, item.id)}
+    </article>
+  `;
+}
+
+function renderItemActions(kind, id) {
+    return `
+    <div class="form-actions">
+      <button class="button ghost" data-action="edit" data-kind="${kind}" data-id="${id}" type="button">Edit</button>
+      <button class="button ghost" data-action="delete" data-kind="${kind}" data-id="${id}" type="button">Delete</button>
+    </div>
+  `;
+}
+
+function normalizeFormData(kind, formData) {
+    const common = Object.fromEntries(formData.entries());
+    const numericFields = {
+        lapNote: ['lap_number'],
+        taggedIncident: ['lap_number'],
+        rangeEvent: ['start_lap', 'end_lap'],
+        driverStint: ['start_lap', 'end_lap'],
+    }[kind] || [];
+
+    numericFields.forEach((field) => {
+        common[field] = Number.parseInt(common[field], 10);
+    });
+
+    if (!common.id) {
+        delete common.id;
+    }
+
+    return common;
+}
+
+function findItem(viewModel, kind, id) {
+    if (!viewModel) {
+        return null;
+    }
+
+    const listKey = KIND_CONFIG[kind].listKey;
+    return viewModel.annotations[listKey].find((item) => item.id === id) ?? null;
+}
+
+function hydrateForm(form, item, selectedLapRow) {
+    if (!form) {
+        return;
+    }
+
+    form.reset();
+
+    const defaults = item ?? buildDefaultValues(form.dataset.kind, selectedLapRow);
+    Object.entries(defaults).forEach(([key, value]) => {
+        const field = form.elements.namedItem(key);
+        if (field) {
+            field.value = value ?? '';
+        }
+    });
+}
+
+function buildDefaultValues(kind, selectedLapRow) {
+    if (!selectedLapRow) {
+        return {};
+    }
+
+    return {
+        lap_number: selectedLapRow.lap_number,
+        start_lap: selectedLapRow.lap_number,
+        end_lap: selectedLapRow.lap_number,
+        driver_name: selectedLapRow.driver_name,
+        color: {
+            lapNote: '#f59e0b',
+            taggedIncident: '#d94f2b',
+            rangeEvent: '#2563eb',
+            driverStint: '#059669',
+        }[kind],
+    };
+}

@@ -112,6 +112,27 @@ export function formatDurationMs(milliseconds, fallback = '-') {
     return `${minutes}:${secondsLabel}`;
 }
 
+/**
+ * Format lap time in milliseconds to mm:ss or hh:mm:ss format
+ * Does not render hours if lap time is under 1 hour
+ * Examples: "01:23" for 1:23, "01:23:45" for 1+ hour laps
+ */
+export function formatLapTimeHHMMSS(milliseconds, fallback = '—') {
+    if (!Number.isFinite(milliseconds)) {
+        return fallback;
+    }
+
+    const totalSeconds = Math.floor(milliseconds / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    }
+    return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
 export function formatGapDisplay(milliseconds, laps, fallbackText = '-') {
     if (Number.isFinite(laps) && laps !== 0) {
         if (Number.isFinite(milliseconds) && milliseconds > 0) {

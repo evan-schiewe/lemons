@@ -1,6 +1,6 @@
 const DEFAULT_HEADERS = [
     'lap',
-    'car',
+    'team_slot',
     'driver',
     'lap_time',
     'position',
@@ -11,7 +11,7 @@ const DEFAULT_HEADERS = [
 
 const HEADER_ALIASES = {
     lap: ['lap', 'lap number', 'lap_no', 'lapno'],
-    car: ['car', 'car number', 'car_no', 'carnumber'],
+    team_slot: ['team', 'entry', 'slot', 'vehicle'],
     driver: ['driver', 'driver name'],
     lap_time: ['lap time', 'laptime', 'time', 'last lap'],
     position: ['position', 'pos', 'place'],

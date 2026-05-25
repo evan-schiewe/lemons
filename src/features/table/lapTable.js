@@ -20,10 +20,10 @@ export function renderLapTable(tbody, rows, selectedLapId, raceStartTimeIso = nu
                 .join(' · ');
 
             return `
-        <tr data-lap-id="${escapeHtml(row.id)}" class="${row.id === selectedLapId ? 'is-selected' : ''}">
+                <tr data-lap-id="${escapeHtml(row.id)}" class="${row.id === selectedLapId ? 'is-selected' : ''}">
           <td>${escapeHtml(row.lap_number)}</td>
                     <td>${escapeHtml(formatWallClock(raceStartTimeIso, row.lap_start_offset_ms))}</td>
-          <td>${escapeHtml(row.driver_name || '-')}</td>
+                      <td>${escapeHtml(row.display_driver_name || row.driver_name || '-')}</td>
           <td>${escapeHtml(formatDurationMs(row.lap_time_ms))}</td>
           <td>${escapeHtml(formatNumber(row.position_value))}</td>
           <td>${escapeHtml(formatSpeed(row.speed_mph))}</td>
