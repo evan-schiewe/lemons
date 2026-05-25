@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lemons Race Viewer</title>
+  </head>
+  <body>
+    <div id="app">
+      <header class="hero">
+        <div>
+          <p class="eyebrow">Lemons Analytics</p>
+          <h1>Race Viewer</h1>
+          <p class="hero-copy">
+            Import lap CSVs, normalize malformed timing rows, and review race pace,
+            positions, gaps, and annotations from a browser-local SQLite database.
+          </p>
+        </div>
+        <div class="hero-actions">
+          <label class="button primary" for="csv-input">Import CSV</label>
+          <input id="csv-input" type="file" accept=".csv,text/csv" multiple hidden />
+          <button id="export-json" class="button secondary" type="button">Export JSON</button>
+          <button id="export-sqlite" class="button ghost" type="button">Export SQLite</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <!-- Sticky tab panel with chart and annotations -->
+        <div class="sticky-chart-panel">
+          <div class="tab-switcher">
+            <button class="tab-button active" data-tab="chart">Chart</button>
+            <button class="tab-button" data-tab="annotations">Annotations</button>
+          </div>
+          <div class="tab-content-wrapper">
+            <div id="chart-tab" class="tab-content active">
+              <section class="panel chart-panel sticky-content">
+                <div class="panel-header">
+                  <h2>Lap Time</h2>
+                  <span class="panel-subtitle">Green flag pace excludes outlier laps</span>
+                </div>
+                <div id="lap-time-chart" class="chart-surface"></div>
+              </section>
+            </div>
+            <div id="annotations-tab" class="tab-content">
+              <section class="panel chart-panel sticky-content">
+                <div class="panel-header">
+                  <h2>Annotations</h2>
+                  <span class="panel-subtitle">Notes, incidents, events, stints</span>
+                </div>
+                <div id="annotation-panel"></div>
+              </section>
+            </div>
+          </div>
+        </div>
+
+        <section class="panel controls-panel">
+          <div class="panel-header">
+            <h2>Filters</h2>
+            <span id="storage-mode" class="status-pill">Storage: loading</span>
+          </div>
+          <div class="filters-grid">
+            <label>
+              <span>Race</span>
+              <select id="race-select"></select>
+            </label>
+            <label>
+              <span>Driver</span>
+              <select id="driver-filter">
+                <option value="">All drivers</option>
+              </select>
+            </label>
+            <label>
+              <span>Search</span>
+              <input id="search-filter" type="search" placeholder="Car, note, incident" />
+            </label>
+            <label>
+              <span>Lap Range</span>
+              <div class="range-pair">
+                <input id="lap-min" type="number" min="1" placeholder="Min" />
+                <input id="lap-max" type="number" min="1" placeholder="Max" />
+              </div>
+            </label>
+            <label>
+              <span>Race Start Time</span>
+              <input id="race-start-time" type="datetime-local" />
+            </label>
+          </div>
+          <div id="import-status" class="inline-note">No race loaded.</div>
+        </section>
+
+        <section class="dashboard-grid" id="summary-cards"></section>
+
+        <section class="panel table-panel">
+          <div class="panel-header">
+            <h2>Lap Table</h2>
+            <span id="selected-lap" class="panel-subtitle">No lap selected</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th data-sort="lap_number">Lap</th>
+                  <th data-sort="lap_start_offset_ms">Lap Start</th>
+                  <th data-sort="driver_name">Driver</th>
+                  <th data-sort="lap_time_ms">Lap Time</th>
+                  <th data-sort="position_value">Pos</th>
+                  <th data-sort="speed_mph">MPH</th>
+                  <th data-sort="gap_ahead_display">Gap Ahead</th>
+                  <th data-sort="gap_leader_display">Gap Leader</th>
+                  <th data-sort="flags">Flags</th>
+                </tr>
+              </thead>
+              <tbody id="lap-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>

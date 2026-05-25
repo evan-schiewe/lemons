@@ -1,0 +1,61 @@
+import { escapeHtml, formatNumber, formatSpeed } from '../../utils/format.js';
+import { formatDurationMs, formatWallClock } from '../../utils/time.js';
+
+export function renderLapTable(tbody, rows, selectedLapId, raceStartTimeIso = null) {
+    if (!rows.length) {
+        tbody.innerHTML = '<tr><td colspan="9">No laps match the current filters.</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = rows
+        .map((row) => {
+            const flags = [
+                row.is_outlier ? 'Outlier' : null,
+                row.is_pit_candidate ? 'Pit' : null,
+                row.is_repair_candidate ? 'Repair' : null,
+                row.note_count ? `${row.note_count} note` : null,
+                row.incident_count ? `${row.incident_count} incident` : null,
+            ]
+                .filter(Boolean)
+                .join(' · ');
+
+            return `
+        <tr data-lap-id="${escapeHtml(row.id)}" class="${row.id === selectedLapId ? 'is-selected' : ''}">
+          <td>${escapeHtml(row.lap_number)}</td>
+                    <td>${escapeHtml(formatWallClock(raceStartTimeIso, row.lap_start_offset_ms))}</td>
+          <td>${escapeHtml(row.driver_name || '-')}</td>
+          <td>${escapeHtml(formatDurationMs(row.lap_time_ms))}</td>
+          <td>${escapeHtml(formatNumber(row.position_value))}</td>
+          <td>${escapeHtml(formatSpeed(row.speed_mph))}</td>
+          <td>${escapeHtml(row.gap_ahead_display || '-')}</td>
+          <td>${escapeHtml(row.gap_leader_display || '-')}</td>
+          <td>${escapeHtml(flags || '-')}</td>
+        </tr>
+      `;
+        })
+        .join('');
+}
+
+export function updateSortIndicators(table, sort) {
+    table.querySelectorAll('thead th[data-sort]').forEach((header) => {
+        const column = header.dataset.sort;
+        header.textContent = header.textContent.replace(/\s[↑↓]$/, '');
+        if (column === sort.column) {
+            header.textContent = `${header.textContent} ${sort.direction === 'desc' ? '↓' : '↑'}`;
+        }
+    });
+}
+
+export function scrollToLap(lapNumber) {
+    const tbody = document.querySelector('#lap-table-body');
+    if (!tbody) return;
+
+    const row = Array.from(tbody.querySelectorAll('tr')).find((tr) => {
+        const lapCell = tr.querySelector('td:first-child');
+        return lapCell && parseInt(lapCell.textContent, 10) === lapNumber;
+    });
+
+    if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+}
