@@ -40,6 +40,66 @@
                 </div>
                 <div id="lap-time-chart" class="chart-surface"></div>
               </section>
+              <section class="panel controls-panel">
+                <div class="panel-header">
+                  <h2>Filters</h2>
+                  <span id="storage-mode" class="status-pill">Storage: loading</span>
+                </div>
+                <div class="filters-grid">
+                  <label>
+                    <span>Race</span>
+                    <select id="race-select"></select>
+                  </label>
+                  <label>
+                    <span>Driver</span>
+                    <select id="driver-filter">
+                      <option value="">All drivers</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Search</span>
+                    <input id="search-filter" type="search" placeholder="Driver, note, incident" />
+                  </label>
+                  <label>
+                    <span>Lap Range</span>
+                    <div class="range-pair">
+                      <input id="lap-min" type="number" min="1" placeholder="Min" />
+                      <input id="lap-max" type="number" min="1" placeholder="Max" />
+                    </div>
+                  </label>
+                  <label>
+                    <span>Race Start Time</span>
+                    <input id="race-start-time" type="datetime-local" />
+                  </label>
+                </div>
+                <div id="import-status" class="inline-note">No race loaded.</div>
+              </section>
+
+              <section class="dashboard-grid" id="summary-cards"></section>
+
+              <section class="panel table-panel">
+                <div class="panel-header">
+                  <h2>Lap Table</h2>
+                </div>
+                <div class="table-wrap">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th data-sort="lap_number">Lap</th>
+                        <th data-sort="lap_start_offset_ms">Lap Start</th>
+                        <th data-sort="driver_name">Driver</th>
+                        <th data-sort="lap_time_ms">Lap Time</th>
+                        <th data-sort="position_value">Pos</th>
+                        <th data-sort="speed_mph">MPH</th>
+                        <th data-sort="gap_ahead_display">Gap Ahead</th>
+                        <th data-sort="gap_leader_display">Gap Leader</th>
+                        <th data-sort="flags">Flags</th>
+                      </tr>
+                    </thead>
+                    <tbody id="lap-table-body"></tbody>
+                  </table>
+                </div>
+              </section>
             </div>
             <div id="annotations-tab" class="tab-content">
               <section class="panel chart-panel sticky-content">
@@ -47,73 +107,24 @@
                   <h2>Annotation Helper</h2>
                   <span class="panel-subtitle">Review candidates: pit, repair, outlier</span>
                 </div>
-                <!-- Primary annotation helper container -->
-                <div id="annotation-helper-container" class="annotation-helper"></div>
+                <div class="annotations-workspace">
+                  <div class="annotations-workspace-section">
+                    <h3 class="annotations-section-title">Review Queue</h3>
+                    <p class="annotations-section-copy">Work candidate laps in sequence and jump into detailed edits when needed.</p>
+                    <div id="annotation-helper-container" class="annotation-helper"></div>
+                  </div>
+                  <div class="annotations-workspace-section">
+                    <div class="panel-header">
+                      <h3>Annotation Editor</h3>
+                      <span class="panel-subtitle">Edit driver stints, incidents, and range events</span>
+                    </div>
+                    <div id="annotation-panel-container" class="annotation-panel"></div>
+                  </div>
+                </div>
               </section>
             </div>
           </div>
         </div>
-
-        <section class="panel controls-panel">
-          <div class="panel-header">
-            <h2>Filters</h2>
-            <span id="storage-mode" class="status-pill">Storage: loading</span>
-          </div>
-          <div class="filters-grid">
-            <label>
-              <span>Race</span>
-              <select id="race-select"></select>
-            </label>
-            <label>
-              <span>Driver</span>
-              <select id="driver-filter">
-                <option value="">All drivers</option>
-              </select>
-            </label>
-            <label>
-              <span>Search</span>
-              <input id="search-filter" type="search" placeholder="Driver, note, incident" />
-            </label>
-            <label>
-              <span>Lap Range</span>
-              <div class="range-pair">
-                <input id="lap-min" type="number" min="1" placeholder="Min" />
-                <input id="lap-max" type="number" min="1" placeholder="Max" />
-              </div>
-            </label>
-            <label>
-              <span>Race Start Time</span>
-              <input id="race-start-time" type="datetime-local" />
-            </label>
-          </div>
-          <div id="import-status" class="inline-note">No race loaded.</div>
-        </section>
-
-        <section class="dashboard-grid" id="summary-cards"></section>
-
-        <section class="panel table-panel">
-          <div class="panel-header">
-            <h2>Lap Table</h2>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th data-sort="lap_number">Lap</th>
-                  <th data-sort="lap_start_offset_ms">Lap Start</th>
-                  <th data-sort="driver_name">Driver</th>
-                  <th data-sort="lap_time_ms">Lap Time</th>
-                  <th data-sort="position_value">Pos</th>
-                  <th data-sort="speed_mph">MPH</th>
-                  <th data-sort="gap_ahead_display">Gap Ahead</th>
-                  <th data-sort="gap_leader_display">Gap Leader</th>
-                  <th data-sort="flags">Flags</th>
-                </tr>
-              </thead>
-              <tbody id="lap-table-body"></tbody>
-            </table>
-          </div>
-        </section>
       </main>
     </div>
     <script type="module" src="/src/main.js"></script>

@@ -19,6 +19,10 @@ body {
   min-height: 100vh;
 }
 
+body.annotation-modal-open {
+  overflow: hidden;
+}
+
 button,
 input,
 select {
@@ -36,6 +40,7 @@ select {
   justify-content: space-between;
   gap: 24px;
   align-items: flex-start;
+  padding-left: 16px;
   margin-bottom: 24px;
 }
 
@@ -303,11 +308,119 @@ tbody tr:hover {
   gap: 10px;
 }
 
+.annotations-workspace {
+  display: grid;
+  gap: 18px;
+}
+
+.annotations-workspace-section {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(120, 91, 55, 0.12);
+}
+
+.annotations-section-title {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.annotations-section-copy {
+  margin: -6px 0 0;
+  color: #6b5d4d;
+  font-size: 0.92rem;
+}
+
+.annotation-editor-intro {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.annotation-editor-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.annotation-edit-state {
+  margin-top: 6px;
+  color: #b24b24;
+  font-weight: 600;
+}
+
+.annotation-form-switcher {
+  background: linear-gradient(180deg, rgba(255, 252, 248, 0.92), rgba(248, 241, 232, 0.86));
+}
+
+.annotation-form-switcher select {
+  font-weight: 600;
+}
+
+.annotation-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.annotation-modal-root {
+  position: static;
+}
+
+.annotation-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.annotation-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(31, 27, 22, 0.42);
+  backdrop-filter: blur(3px);
+  cursor: pointer;
+}
+
+.annotation-modal-card {
+  position: relative;
+  z-index: 1;
+  width: min(680px, 100%);
+  max-height: min(90vh, 860px);
+  overflow: auto;
+  padding: 20px;
+  border-radius: 24px;
+  background: rgba(255, 250, 244, 0.97);
+  border: 1px solid rgba(120, 91, 55, 0.18);
+  box-shadow: 0 24px 80px rgba(31, 27, 22, 0.24);
+}
+
+.annotation-modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  background: rgba(255, 250, 244, 0.97);
+}
+
 .annotation-section {
   padding: 14px;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.66);
   border: 1px solid rgba(120, 91, 55, 0.1);
+}
+
+.annotation-section-editing {
+  border-color: rgba(217, 79, 43, 0.42);
+  box-shadow: 0 0 0 2px rgba(217, 79, 43, 0.12);
 }
 
 .annotation-item {
@@ -341,6 +454,14 @@ tbody tr:hover {
     padding: 12px 20px;
   }
 
+  .annotation-editor-intro {
+    flex-direction: column;
+  }
+
+  .annotation-editor-actions {
+    justify-content: flex-start;
+  }
+
   .filters-grid {
     grid-template-columns: 1fr;
   }
@@ -357,8 +478,18 @@ tbody tr:hover {
     padding-top: 18px;
   }
 
+  .annotation-modal {
+    padding: 12px;
+  }
+
+  .annotation-modal-card {
+    padding: 16px;
+    max-height: 94vh;
+  }
+
   .hero {
     flex-direction: column;
+    padding-left: 12px;
   }
 
   .hero-actions {

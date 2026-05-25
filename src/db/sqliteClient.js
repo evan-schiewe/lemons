@@ -1,6 +1,7 @@
 import initSqlJs from 'sql.js';
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import schemaSql from './schema.sql?raw';
+import { normalizeRaceData } from '../model/normalizeRaceData.js';
 
 const DATABASE_FILE_NAME = 'lemons-race-viewer.sqlite';
 
@@ -56,6 +57,19 @@ export class SQLiteClient {
         return this.query(sql, params)[0] ?? null;
     }
 
+    tableExists(database, tableName) {
+        return this.queryDatabase(
+            database,
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?",
+            [tableName],
+        ).length > 0;
+    }
+
+    countRows(database, tableName) {
+        const rows = this.queryDatabase(database, `SELECT COUNT(*) AS count FROM ${tableName}`);
+        return Number(rows[0]?.count ?? 0);
+    }
+
     execute(sql, params = []) {
         this.db.run(sql, params);
     }
@@ -70,6 +84,127 @@ export class SQLiteClient {
             });
         } finally {
             statement.free();
+        }
+    }
+
+    executeManyOnDatabase(database, sql, rows) {
+        const statement = database.prepare(sql);
+
+        try {
+            rows.forEach((params) => {
+                statement.run(params);
+                statement.reset();
+            });
+        } finally {
+            statement.free();
+        }
+    }
+
+    rebuildNormalizedLaps(database) {
+        const races = this.queryDatabase(database, 'SELECT id FROM races ORDER BY rowid');
+        if (!races.length) {
+            return;
+        }
+
+        const insertSql = `
+        INSERT INTO normalized_laps (
+                    id, race_id, raw_row_id, lap_identity, lap_number, driver_name,
+          lap_time_ms, lap_time_text, position_value, speed_mph, gap_ahead_ms, gap_ahead_laps,
+          gap_ahead_display, gap_leader_ms, gap_leader_laps, gap_leader_display,
+          rolling_median_ms, is_pit_candidate, is_repair_candidate, is_outlier, is_green_flag,
+          search_text
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `;
+
+        const rebuiltRows = [];
+
+        database.run('BEGIN');
+
+        try {
+            database.run('DELETE FROM normalized_laps');
+
+            races.forEach((race) => {
+                const rawRows = this.queryDatabase(
+                    database,
+                    `
+                SELECT id, race_id, row_index, csv_row_number, raw_line, raw_lap, raw_entry, raw_driver,
+                  raw_lap_time, raw_position, raw_speed, raw_gap_ahead, raw_gap_leader
+                FROM raw_lap_rows
+                WHERE race_id = ?
+                ORDER BY row_index ASC
+              `,
+                    [race.id],
+                );
+
+                if (!rawRows.length) {
+                    return;
+                }
+
+                const parsedRows = rawRows.map((row, index) => ({
+                    rowIndex: index,
+                    csvRowNumber: row.csv_row_number,
+                    rawLine: row.raw_line,
+                    rawCells: [
+                        row.raw_lap,
+                        row.raw_entry,
+                        row.raw_driver,
+                        row.raw_lap_time,
+                        row.raw_position,
+                        row.raw_speed,
+                        row.raw_gap_ahead,
+                        row.raw_gap_leader,
+                    ],
+                    values: {
+                        lap: row.raw_lap ?? '',
+                        team_slot: row.raw_entry ?? '',
+                        driver: row.raw_driver ?? '',
+                        lap_time: row.raw_lap_time ?? '',
+                        position: row.raw_position ?? '',
+                        speed: row.raw_speed ?? '',
+                        gap_ahead: row.raw_gap_ahead ?? '',
+                        gap_leader: row.raw_gap_leader ?? '',
+                    },
+                }));
+
+                const normalized = normalizeRaceData(parsedRows);
+
+                normalized.laps.forEach((lap) => {
+                    const sourceRow = rawRows[lap.rowIndex];
+                    rebuiltRows.push([
+                        crypto.randomUUID(),
+                        race.id,
+                        sourceRow?.id ?? null,
+                        `${race.id}:${lap.lapNumber}:${lap.driverName}:${lap.lapTimeText}`,
+                        lap.lapNumber,
+                        lap.driverName,
+                        lap.lapTime.ms,
+                        lap.lapTimeText,
+                        lap.positionValue,
+                        lap.speedMph,
+                        lap.gapAhead.ms,
+                        lap.gapAhead.laps,
+                        lap.gapAhead.display,
+                        lap.gapLeader.ms,
+                        lap.gapLeader.laps,
+                        lap.gapLeader.display,
+                        lap.rollingMedianMs,
+                        lap.isPitCandidate ? 1 : 0,
+                        lap.isRepairCandidate ? 1 : 0,
+                        lap.isOutlier ? 1 : 0,
+                        lap.isGreenFlag ? 1 : 0,
+                        lap.searchText,
+                    ]);
+                });
+            });
+
+            if (rebuiltRows.length) {
+                this.executeManyOnDatabase(database, insertSql, rebuiltRows);
+            }
+
+            database.run('COMMIT');
+        } catch (error) {
+            database.run('ROLLBACK');
+            throw error;
         }
     }
 
@@ -96,16 +231,20 @@ export class SQLiteClient {
         try {
             restoredDatabase = new this.SQL.Database(incoming);
 
-            const tables = this.queryDatabase(
-                restoredDatabase,
-                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('races', 'raw_lap_rows', 'normalized_laps')",
-            );
-            if (tables.length < 3) {
+            const hasRacesTable = this.tableExists(restoredDatabase, 'races');
+            const hasRawLapRowsTable = this.tableExists(restoredDatabase, 'raw_lap_rows');
+            if (!hasRacesTable || !hasRawLapRowsTable) {
                 throw new Error('Selected file is not a Lemons Race Viewer SQLite export.');
             }
 
+            const hadNormalizedLapsTable = this.tableExists(restoredDatabase, 'normalized_laps');
+
             restoredDatabase.run(schemaSql);
             this.applyMigrations(restoredDatabase);
+
+            if (!hadNormalizedLapsTable || this.countRows(restoredDatabase, 'normalized_laps') === 0) {
+                this.rebuildNormalizedLaps(restoredDatabase);
+            }
 
             const previousDb = this.db;
             this.db = restoredDatabase;

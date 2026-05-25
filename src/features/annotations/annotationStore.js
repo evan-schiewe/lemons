@@ -17,6 +17,27 @@ const TABLE_CONFIG = {
     },
 };
 
+function ensurePositiveInteger(value, field) {
+    if (!Number.isInteger(value) || value < 1) {
+        throw new Error(`${field} must be a whole lap number greater than 0.`);
+    }
+}
+
+function validateAnnotationPayload(kind, payload) {
+    if (kind === 'taggedIncident' || kind === 'lapNote') {
+        ensurePositiveInteger(payload.lap_number, 'Lap');
+    }
+
+    if (kind === 'rangeEvent' || kind === 'driverStint') {
+        ensurePositiveInteger(payload.start_lap, 'Start lap');
+        ensurePositiveInteger(payload.end_lap, 'End lap');
+
+        if (payload.end_lap < payload.start_lap) {
+            throw new Error('End lap must be greater than or equal to start lap.');
+        }
+    }
+}
+
 export function createAnnotationStore(db) {
     return {
         async save(kind, payload) {
@@ -24,6 +45,8 @@ export function createAnnotationStore(db) {
             if (!config) {
                 throw new Error(`Unknown annotation kind: ${kind}`);
             }
+
+            validateAnnotationPayload(kind, payload);
 
             const now = new Date().toISOString();
             const id = payload.id || crypto.randomUUID();

@@ -1,6 +1,7 @@
 import './styles.css';
 import { SQLiteClient } from './db/sqliteClient.js';
 import { mountAnnotationHelper } from './features/annotations/annotationHelperView.js';
+import { mountAnnotationPanel } from './features/annotations/annotationPanel.js';
 import { createAnnotationStore } from './features/annotations/annotationStore.js';
 import { createLapTimeChart } from './features/charts/lapTimeChart.js';
 import { renderSummaryCards } from './features/dashboard/summaryCards.js';
@@ -38,6 +39,7 @@ const refs = {
     tableBody: document.querySelector('#lap-table-body'),
     table: document.querySelector('table'),
     helperContainer: document.querySelector('#annotation-helper-container'),
+    annotationPanelContainer: document.querySelector('#annotation-panel-container'),
     tabButtons: document.querySelectorAll('.tab-button'),
     tabContents: document.querySelectorAll('.tab-content'),
 };
@@ -65,6 +67,53 @@ const charts = {
 
 // Placeholder for annotation helper - will be initialized when module is created
 let annotationHelper = null;
+let annotationPanel = null;
+
+function createAnnotationHandlers({ autoAdvanceOnSave = false } = {}) {
+    return {
+        onSave: async (kind, payload) => {
+            if (!state.activeRaceId) {
+                setStatus('Import a race before saving annotations.');
+                return false;
+            }
+
+            try {
+                await state.annotationStore.save(kind, { ...payload, race_id: state.activeRaceId });
+                setStatus('Annotation saved.');
+
+                if (autoAdvanceOnSave && state.helperAutoAdvance) {
+                    const candidates = getCandidates(state.db, state.activeRaceId);
+                    const annotations = getRaceAnnotations(state.db, state.activeRaceId);
+                    const augmented = candidates.map((candidate) => augmentCandidateWithReviewStatus(candidate, annotations, state.db, state.activeRaceId));
+
+                    for (let i = state.helperCurrentIndex + 1; i < augmented.length; i++) {
+                        if (!augmented[i].isReviewed) {
+                            state.helperCurrentIndex = i;
+                            break;
+                        }
+                    }
+                }
+
+                await refreshView();
+                return true;
+            } catch (error) {
+                console.error(error);
+                setStatus(`Unable to save annotation: ${error.message}`);
+                return false;
+            }
+        },
+        onDelete: async (kind, id) => {
+            try {
+                await state.annotationStore.remove(kind, id);
+                setStatus('Annotation removed.');
+                await refreshView();
+            } catch (error) {
+                console.error(error);
+                setStatus(`Unable to remove annotation: ${error.message}`);
+            }
+        },
+    };
+}
 
 initialize().catch((error) => {
     console.error(error);
@@ -84,36 +133,12 @@ async function initialize() {
     const helperContainer = refs.helperContainer;
     if (helperContainer) {
         annotationHelper = mountAnnotationHelper(helperContainer, {
-            onSave: async (kind, payload) => {
-                if (!state.activeRaceId) {
-                    setStatus('Import a race before saving annotations.');
-                    return;
-                }
-
-                await state.annotationStore.save(kind, { ...payload, race_id: state.activeRaceId });
-                setStatus('Annotation saved.');
-
-                // Auto-advance to next unreviewed candidate if enabled
-                if (state.helperAutoAdvance) {
-                    const candidates = getCandidates(state.db, state.activeRaceId);
-                    const annotations = getRaceAnnotations(state.db, state.activeRaceId);
-                    const augmented = candidates.map((c) => augmentCandidateWithReviewStatus(c, annotations, state.db, state.activeRaceId));
-
-                    // Find next unreviewed candidate
-                    for (let i = state.helperCurrentIndex + 1; i < augmented.length; i++) {
-                        if (!augmented[i].isReviewed) {
-                            state.helperCurrentIndex = i;
-                            break;
-                        }
-                    }
-                }
-
-                await refreshView();
+            ...createAnnotationHandlers({ autoAdvanceOnSave: true }),
+            onOpenComposer: (kind, options) => {
+                annotationPanel?.openComposer(kind, options);
             },
-            onDelete: async (kind, id) => {
-                await state.annotationStore.remove(kind, id);
-                setStatus('Annotation removed.');
-                await refreshView();
+            onOpenEditor: (kind, id) => {
+                annotationPanel?.openEditor(kind, id);
             },
             onNavigate: (direction) => {
                 const candidates = getCandidates(state.db, state.activeRaceId);
@@ -154,6 +179,10 @@ async function initialize() {
                 refreshView();
             },
         });
+    }
+
+    if (refs.annotationPanelContainer) {
+        annotationPanel = mountAnnotationPanel(refs.annotationPanelContainer, createAnnotationHandlers());
     }
 
     wireEvents();
@@ -357,6 +386,17 @@ async function refreshView() {
         if (annotationHelper) {
             annotationHelper.render(null);
         }
+        if (annotationPanel) {
+            annotationPanel.render({
+                selectedLapRow: null,
+                annotations: {
+                    lapNotes: [],
+                    taggedIncidents: [],
+                    rangeEvents: [],
+                    driverStints: [],
+                },
+            });
+        }
         return;
     }
 
@@ -408,6 +448,13 @@ async function refreshView() {
             autoAdvance: state.helperAutoAdvance,
             filterContext: filters,
             raceStartTime: activeRace?.race_start_time ?? null,
+        });
+    }
+
+    if (annotationPanel) {
+        annotationPanel.render({
+            selectedLapRow,
+            annotations,
         });
     }
 }
