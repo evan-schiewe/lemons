@@ -2,9 +2,24 @@ import { escapeHtml, formatNumber, formatSpeed } from '../../utils/format.js';
 import { formatDurationMs, formatWallClock } from '../../utils/time.js';
 
 const KIND_CONFIG = {
-  taggedIncident: { formId: 'tagged-incident-form', title: 'Tagged Incident', listKey: 'taggedIncidents', timingLabel: 'Single lap event' },
-  rangeEvent: { formId: 'range-event-form', title: 'Range Event', listKey: 'rangeEvents', timingLabel: 'Lap range event' },
-  driverStint: { formId: 'driver-stint-form', title: 'Driver Stint', listKey: 'driverStints', timingLabel: 'Driver span across laps' },
+  taggedIncident: {
+    formId: 'tagged-incident-form',
+    title: 'Tagged Incident',
+    listKey: 'taggedIncidents',
+    timingLabel: 'Single lap event',
+  },
+  rangeEvent: {
+    formId: 'range-event-form',
+    title: 'Range Event',
+    listKey: 'rangeEvents',
+    timingLabel: 'Lap range event',
+  },
+  driverStint: {
+    formId: 'driver-stint-form',
+    title: 'Driver Stint',
+    listKey: 'driverStints',
+    timingLabel: 'Driver span across laps',
+  },
 };
 
 const DEFAULT_KIND = 'taggedIncident';
@@ -13,7 +28,7 @@ const DEFAULT_KIND = 'taggedIncident';
  * Find the selected lap and its neighbors (lap before and lap after)
  */
 function getContextLaps(rows, selectedLapRow) {
-  if (!selectedLapRow || !rows || !rows.length) {
+  if (!selectedLapRow || !rows?.length) {
     return { before: null, current: selectedLapRow, after: null };
   }
 
@@ -38,7 +53,9 @@ function renderContextLapRow(row, label, raceStartTimeIso) {
   const flags = [
     hasPitTag ? 'Pit' : null,
     row.is_outlier && !hasPitTag && !hasIncidentTag ? 'Outlier' : null,
-  ].filter(Boolean).join(' · ');
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return `
     <tr class="annotation-context-lap ${label}">
@@ -132,7 +149,10 @@ export function mountAnnotationPanel(container, handlers) {
 
     const formData = new FormData(form);
     const kind = form.dataset.kind;
-    const didSave = await handlers.onSave(kind, normalizeFormData(kind, formData));
+    const didSave = await handlers.onSave(
+      kind,
+      normalizeFormData(kind, formData),
+    );
     if (didSave) {
       state.isModalOpen = false;
       state.activeEdit = null;
@@ -147,10 +167,17 @@ export function mountAnnotationPanel(container, handlers) {
       return;
     }
 
-    state.activeKind = selector.value in KIND_CONFIG ? selector.value : DEFAULT_KIND;
+    state.activeKind =
+      selector.value in KIND_CONFIG ? selector.value : DEFAULT_KIND;
     state.activeEdit = null;
     renderCurrentPanel(container, state);
-    hydrateActiveForm(state.modalRoot, state.viewModel, state.activeKind, null, state.prefillValues);
+    hydrateActiveForm(
+      state.modalRoot,
+      state.viewModel,
+      state.activeKind,
+      null,
+      state.prefillValues,
+    );
   }
 
   function handleLapNumberChange(event) {
@@ -158,7 +185,9 @@ export function mountAnnotationPanel(container, handlers) {
       return;
     }
 
-    const input = event.target.closest('input[name="lap_number"], input[name="start_lap"], input[name="end_lap"]');
+    const input = event.target.closest(
+      'input[name="lap_number"], input[name="start_lap"], input[name="end_lap"]',
+    );
     if (!input || !state.viewModel?.rows) {
       return;
     }
@@ -168,15 +197,23 @@ export function mountAnnotationPanel(container, handlers) {
       return;
     }
 
-    const foundLap = state.viewModel.rows.find((row) => row.lap_number === lapNumber);
+    const foundLap = state.viewModel.rows.find(
+      (row) => row.lap_number === lapNumber,
+    );
     if (!foundLap) {
       return;
     }
 
     // Update the mini table in the DOM
-    const contextTableSection = state.modalRoot.querySelector('.annotation-context-table');
+    const contextTableSection = state.modalRoot.querySelector(
+      '.annotation-context-table',
+    );
     if (contextTableSection) {
-      const newTableHtml = renderContextTable(state.viewModel.rows, foundLap, state.viewModel.raceStartTime);
+      const newTableHtml = renderContextTable(
+        state.viewModel.rows,
+        foundLap,
+        state.viewModel.raceStartTime,
+      );
       if (newTableHtml) {
         contextTableSection.outerHTML = newTableHtml;
       }
@@ -202,9 +239,18 @@ export function mountAnnotationPanel(container, handlers) {
       state.modalView = 'form';
       state.activeEdit = null;
       state.prefillValues = null;
-      state.activeKind = button.dataset.kind in KIND_CONFIG ? button.dataset.kind : state.activeKind;
+      state.activeKind =
+        button.dataset.kind in KIND_CONFIG
+          ? button.dataset.kind
+          : state.activeKind;
       renderCurrentPanel(container, state);
-      hydrateActiveForm(state.modalRoot, state.viewModel, state.activeKind, null, state.prefillValues);
+      hydrateActiveForm(
+        state.modalRoot,
+        state.viewModel,
+        state.activeKind,
+        null,
+        state.prefillValues,
+      );
       return;
     }
 
@@ -249,7 +295,11 @@ export function mountAnnotationPanel(container, handlers) {
     render(viewModel) {
       state.viewModel = viewModel;
       if (state.activeEdit?.kind) {
-        const nextItem = findItem(viewModel, state.activeEdit.kind, state.activeEdit.id);
+        const nextItem = findItem(
+          viewModel,
+          state.activeEdit.kind,
+          state.activeEdit.id,
+        );
         state.activeEdit = nextItem ? state.activeEdit : null;
       }
 
@@ -260,7 +310,9 @@ export function mountAnnotationPanel(container, handlers) {
           state.modalRoot,
           viewModel,
           state.activeKind,
-          state.activeEdit ? findItem(viewModel, state.activeEdit.kind, state.activeEdit.id) : null,
+          state.activeEdit
+            ? findItem(viewModel, state.activeEdit.kind, state.activeEdit.id)
+            : null,
           state.prefillValues,
           false,
         );
@@ -273,7 +325,13 @@ export function mountAnnotationPanel(container, handlers) {
       state.modalView = 'form';
       state.prefillValues = options.prefill ?? null;
       renderCurrentPanel(container, state);
-      hydrateActiveForm(state.modalRoot, state.viewModel, state.activeKind, null, state.prefillValues);
+      hydrateActiveForm(
+        state.modalRoot,
+        state.viewModel,
+        state.activeKind,
+        null,
+        state.prefillValues,
+      );
     },
     openEditor(kind, id) {
       const item = findItem(state.viewModel, kind, id);
@@ -313,19 +371,24 @@ export function mountAnnotationPanel(container, handlers) {
 }
 
 function renderCurrentPanel(container, state) {
-  container.innerHTML = renderPanel(state.viewModel, state.activeEdit, state.activeKind);
+  container.innerHTML = renderPanel(state.viewModel, state.activeEdit);
   state.modalRoot.innerHTML = state.isModalOpen
-    ? renderModal(state.viewModel, state.activeEdit, state.activeKind, state.modalView)
+    ? renderModal(
+        state.viewModel,
+        state.activeEdit,
+        state.activeKind,
+        state.modalView,
+      )
     : '';
   document.body.classList.toggle('annotation-modal-open', state.isModalOpen);
 }
 
-function renderPanel(viewModel, activeEdit, activeKind) {
+function renderPanel(viewModel, activeEdit) {
   const selected = viewModel.selectedLapRow;
-  const annotationCount = viewModel.annotations.taggedIncidents.length
-    + viewModel.annotations.rangeEvents.length
-    + viewModel.annotations.driverStints.length;
-  const resolvedKind = KIND_CONFIG[activeKind] ? activeKind : DEFAULT_KIND;
+  const annotationCount =
+    viewModel.annotations.taggedIncidents.length +
+    viewModel.annotations.rangeEvents.length +
+    viewModel.annotations.driverStints.length;
 
   return `
     <section class="annotation-section annotation-editor-intro">
@@ -345,43 +408,6 @@ function renderPanel(viewModel, activeEdit, activeKind) {
   `;
 }
 
-function renderSelectedLapDetails(viewModel) {
-  const selected = viewModel?.selectedLapRow;
-  if (!selected) {
-    return `
-      <section class="annotation-section selected-lap-details">
-        <h3>Selected Lap Details</h3>
-        <p class="annotation-meta">Click a lap table row to inspect flags and matching annotations.</p>
-      </section>
-    `;
-  }
-
-  const details = buildSelectedLapDetails(selected, viewModel.annotations);
-
-  return `
-    <section class="annotation-section selected-lap-details">
-      <div class="panel-header">
-        <h3>Selected Lap Details</h3>
-        <span class="annotation-meta">Lap ${escapeHtml(selected.lap_number)}</span>
-      </div>
-      <div class="selected-lap-flags">
-        ${details.flags.length ? details.flags.map((flag) => `<span class="status-pill">${escapeHtml(flag)}</span>`).join('') : '<span class="annotation-meta">No flags on this lap.</span>'}
-      </div>
-      <div class="selected-lap-grid">
-        ${renderSelectedLapList('Lap Notes', details.lapNotes, (item) => `${escapeHtml(item.note_text || 'No details')}`)}
-        ${renderSelectedLapList(
-    'Tagged Incidents',
-    details.taggedIncidents,
-    (item) => `<strong>${escapeHtml(item.tag)}</strong> · ${escapeHtml(item.title || 'Untitled')}<div class="annotation-meta">${escapeHtml(item.details || 'No details')}</div>`,
-    (item) => renderSelectedLapTaggedIncidentActions(item),
-  )}
-        ${renderSelectedLapList('Range Events Covering Lap', details.rangeEvents, (item) => `<strong>${escapeHtml(item.tag)}</strong> · Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)}<div class="annotation-meta">${escapeHtml(item.title || 'Untitled')}</div>`)}
-        ${renderSelectedLapList('Driver Stints Covering Lap', details.driverStints, (item) => `<strong>${escapeHtml(item.driver_name || 'Unknown driver')}</strong> · Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)}<div class="annotation-meta">${escapeHtml(item.notes || 'No stint notes')}</div>`)}
-      </div>
-    </section>
-  `;
-}
-
 function buildSelectedLapDetails(selected, annotations) {
   const hasPitTag = Boolean(selected.is_pit_lap);
   const hasIncidentTag = Number(selected.incident_count) > 0;
@@ -390,17 +416,29 @@ function buildSelectedLapDetails(selected, annotations) {
     selected.is_green_flag ? 'Green Flag' : null,
     hasPitTag ? 'Pit' : null,
     selected.is_outlier && !hasPitTag && !hasIncidentTag ? 'Outlier' : null,
-    selected.note_count ? `${selected.note_count} Note${selected.note_count === 1 ? '' : 's'}` : null,
-    selected.incident_count ? `${selected.incident_count} Incident${selected.incident_count === 1 ? '' : 's'}` : null,
+    selected.note_count
+      ? `${selected.note_count} Note${selected.note_count === 1 ? '' : 's'}`
+      : null,
+    selected.incident_count
+      ? `${selected.incident_count} Incident${selected.incident_count === 1 ? '' : 's'}`
+      : null,
   ].filter(Boolean);
 
   const lapNumber = selected.lap_number;
   return {
     flags,
-    lapNotes: annotations.lapNotes.filter((item) => item.lap_number === lapNumber),
-    taggedIncidents: annotations.taggedIncidents.filter((item) => item.lap_number === lapNumber),
-    rangeEvents: annotations.rangeEvents.filter((item) => item.start_lap <= lapNumber && lapNumber <= item.end_lap),
-    driverStints: annotations.driverStints.filter((item) => item.start_lap <= lapNumber && lapNumber <= item.end_lap),
+    lapNotes: annotations.lapNotes.filter(
+      (item) => item.lap_number === lapNumber,
+    ),
+    taggedIncidents: annotations.taggedIncidents.filter(
+      (item) => item.lap_number === lapNumber,
+    ),
+    rangeEvents: annotations.rangeEvents.filter(
+      (item) => item.start_lap <= lapNumber && lapNumber <= item.end_lap,
+    ),
+    driverStints: annotations.driverStints.filter(
+      (item) => item.start_lap <= lapNumber && lapNumber <= item.end_lap,
+    ),
   };
 }
 
@@ -450,17 +488,20 @@ function renderModal(viewModel, activeEdit, activeKind, modalView = 'form') {
 
 function renderLapDetailsModal(viewModel) {
   const selected = viewModel?.selectedLapRow;
-  const details = selected ? buildSelectedLapDetails(selected, viewModel.annotations) : null;
+  const details = selected
+    ? buildSelectedLapDetails(selected, viewModel.annotations)
+    : null;
   const detailsContent = details
     ? `
         <div class="selected-lap-grid">
           ${renderSelectedLapList('Lap Notes', details.lapNotes, (item) => `${escapeHtml(item.note_text || 'No details')}`)}
           ${renderSelectedLapList(
-      'Tagged Incidents',
-      details.taggedIncidents,
-      (item) => `<strong>${escapeHtml(item.tag)}</strong> · ${escapeHtml(item.title || 'Untitled')}<div class="annotation-meta">${escapeHtml(item.details || 'No details')}</div>`,
-      (item) => renderSelectedLapTaggedIncidentActions(item),
-    )}
+            'Tagged Incidents',
+            details.taggedIncidents,
+            (item) =>
+              `<strong>${escapeHtml(item.tag)}</strong> · ${escapeHtml(item.title || 'Untitled')}<div class="annotation-meta">${escapeHtml(item.details || 'No details')}</div>`,
+            (item) => renderSelectedLapTaggedIncidentActions(item),
+          )}
           ${renderSelectedLapList('Range Events Covering Lap', details.rangeEvents, (item) => `<strong>${escapeHtml(item.tag)}</strong> · Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)}<div class="annotation-meta">${escapeHtml(item.title || 'Untitled')}</div>`)}
           ${renderSelectedLapList('Driver Stints Covering Lap', details.driverStints, (item) => `<strong>${escapeHtml(item.driver_name || 'Unknown driver')}</strong> · Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)}<div class="annotation-meta">${escapeHtml(item.notes || 'No stint notes')}</div>`)}
         </div>
@@ -493,9 +534,13 @@ function renderFormSwitcher(activeKind) {
       <label>
         <span>Annotation Type</span>
         <select data-action="switch-kind">
-          ${Object.entries(KIND_CONFIG).map(([kind, config]) => `
+          ${Object.entries(KIND_CONFIG)
+            .map(
+              ([kind, config]) => `
             <option value="${kind}" ${kind === activeKind ? 'selected' : ''}>${escapeHtml(config.title)} · ${escapeHtml(config.timingLabel)}</option>
-          `).join('')}
+          `,
+            )
+            .join('')}
         </select>
       </label>
     </section>
@@ -635,11 +680,12 @@ function renderItemActions(kind, id) {
 
 function normalizeFormData(kind, formData) {
   const common = Object.fromEntries(formData.entries());
-  const numericFields = {
-    taggedIncident: ['lap_number'],
-    rangeEvent: ['start_lap', 'end_lap'],
-    driverStint: ['start_lap', 'end_lap'],
-  }[kind] || [];
+  const numericFields =
+    {
+      taggedIncident: ['lap_number'],
+      rangeEvent: ['start_lap', 'end_lap'],
+      driverStint: ['start_lap', 'end_lap'],
+    }[kind] || [];
 
   numericFields.forEach((field) => {
     common[field] = Number.parseInt(common[field], 10);
@@ -674,7 +720,10 @@ function hydrateForm(form, item, selectedLapRow, prefillValues = null) {
 
   form.reset();
 
-  const defaults = item ?? { ...buildDefaultValues(form.dataset.kind, selectedLapRow), ...(prefillValues ?? {}) };
+  const defaults = item ?? {
+    ...buildDefaultValues(form.dataset.kind, selectedLapRow),
+    ...(prefillValues ?? {}),
+  };
   Object.entries(defaults).forEach(([key, value]) => {
     const field = form.elements.namedItem(key);
     if (field) {
@@ -709,16 +758,25 @@ function focusAndRevealForm(form) {
   form.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
   const firstEditableField = Array.from(form.elements).find((field) => {
-    return field instanceof HTMLElement
-      && !field.disabled
-      && field.type !== 'hidden'
-      && typeof field.focus === 'function';
+    return (
+      field instanceof HTMLElement &&
+      !field.disabled &&
+      field.type !== 'hidden' &&
+      typeof field.focus === 'function'
+    );
   });
 
   firstEditableField?.focus();
 }
 
-function hydrateActiveForm(container, viewModel, kind, item, prefillValues = null, shouldFocus = true) {
+function hydrateActiveForm(
+  container,
+  viewModel,
+  kind,
+  item,
+  prefillValues = null,
+  shouldFocus = true,
+) {
   const form = container.querySelector(`form[data-kind="${kind}"]`);
   hydrateForm(form, item, viewModel?.selectedLapRow, prefillValues);
 

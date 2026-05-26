@@ -1,26 +1,32 @@
 import { escapeHtml, formatNumber, formatSpeed } from '../../utils/format.js';
 import { formatDurationMs, formatWallClock } from '../../utils/time.js';
 
-export function renderLapTable(tbody, rows, selectedLapId, raceStartTimeIso = null) {
-    if (!rows.length) {
-        tbody.innerHTML = '<tr><td colspan="9">No laps match the current filters.</td></tr>';
-        return;
-    }
+export function renderLapTable(
+  tbody,
+  rows,
+  selectedLapId,
+  raceStartTimeIso = null,
+) {
+  if (!rows.length) {
+    tbody.innerHTML =
+      '<tr><td colspan="9">No laps match the current filters.</td></tr>';
+    return;
+  }
 
-    tbody.innerHTML = rows
-        .map((row) => {
-            const hasPitTag = Boolean(row.is_pit_lap);
-            const hasIncidentTag = Number(row.incident_count) > 0;
-            const flags = [
-                hasPitTag ? 'Pit' : null,
-                row.is_outlier && !hasPitTag && !hasIncidentTag ? 'Outlier' : null,
-                row.note_count ? `${row.note_count} note` : null,
-                row.incident_count ? `${row.incident_count} incident` : null,
-            ]
-                .filter(Boolean)
-                .join(' · ');
+  tbody.innerHTML = rows
+    .map((row) => {
+      const hasPitTag = Boolean(row.is_pit_lap);
+      const hasIncidentTag = Number(row.incident_count) > 0;
+      const flags = [
+        hasPitTag ? 'Pit' : null,
+        row.is_outlier && !hasPitTag && !hasIncidentTag ? 'Outlier' : null,
+        row.note_count ? `${row.note_count} note` : null,
+        row.incident_count ? `${row.incident_count} incident` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
 
-            return `
+      return `
                 <tr data-lap-id="${escapeHtml(row.id)}" class="${row.id === selectedLapId ? 'is-selected' : ''}">
           <td>${escapeHtml(row.lap_number)}</td>
                     <td>${escapeHtml(formatWallClock(raceStartTimeIso, row.lap_start_offset_ms))}</td>
@@ -33,30 +39,30 @@ export function renderLapTable(tbody, rows, selectedLapId, raceStartTimeIso = nu
           <td>${escapeHtml(flags || '-')}</td>
         </tr>
       `;
-        })
-        .join('');
+    })
+    .join('');
 }
 
 export function updateSortIndicators(table, sort) {
-    table.querySelectorAll('thead th[data-sort]').forEach((header) => {
-        const column = header.dataset.sort;
-        header.textContent = header.textContent.replace(/\s[↑↓]$/, '');
-        if (column === sort.column) {
-            header.textContent = `${header.textContent} ${sort.direction === 'desc' ? '↓' : '↑'}`;
-        }
-    });
+  table.querySelectorAll('thead th[data-sort]').forEach((header) => {
+    const column = header.dataset.sort;
+    header.textContent = header.textContent.replace(/\s[↑↓]$/, '');
+    if (column === sort.column) {
+      header.textContent = `${header.textContent} ${sort.direction === 'desc' ? '↓' : '↑'}`;
+    }
+  });
 }
 
 export function scrollToLap(lapNumber) {
-    const tbody = document.querySelector('#lap-table-body');
-    if (!tbody) return;
+  const tbody = document.querySelector('#lap-table-body');
+  if (!tbody) return;
 
-    const row = Array.from(tbody.querySelectorAll('tr')).find((tr) => {
-        const lapCell = tr.querySelector('td:first-child');
-        return lapCell && parseInt(lapCell.textContent, 10) === lapNumber;
-    });
+  const row = Array.from(tbody.querySelectorAll('tr')).find((tr) => {
+    const lapCell = tr.querySelector('td:first-child');
+    return lapCell && parseInt(lapCell.textContent, 10) === lapNumber;
+  });
 
-    if (row) {
-        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
+  if (row) {
+    row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
 }

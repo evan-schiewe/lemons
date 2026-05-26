@@ -6,82 +6,92 @@ import { createAnnotationStore } from './features/annotations/annotationStore.js
 import { exportAnnotationsFile } from './features/export/exportAnnotations.js';
 import { exportDatabaseFile } from './features/export/exportDb.js';
 import { importRace } from './features/import/importRace.js';
-import { mountTimelineView } from './features/timeline/timelineView.js';
 import {
-    getDriverOptions,
-    getLapSeries,
-    getLapTableRows,
-    getRaceSnapshot,
-    getRaceAnnotations,
-    getRaceTimelineEvents,
-    getRaceList,
-    getSummary,
-    getCandidates,
-    augmentCandidateWithReviewStatus,
+  augmentCandidateWithReviewStatus,
+  getCandidates,
+  getDriverOptions,
+  getLapSeries,
+  getLapTableRows,
+  getRaceAnnotations,
+  getRaceList,
+  getRaceSnapshot,
+  getRaceTimelineEvents,
+  getSummary,
 } from './features/query/raceQueries.js';
-import { renderLapTable, updateSortIndicators, scrollToLap } from './features/table/lapTable.js';
+import {
+  renderLapTable,
+  scrollToLap,
+  updateSortIndicators,
+} from './features/table/lapTable.js';
+import { mountTimelineView } from './features/timeline/timelineView.js';
 
 const isLocalEditingEnabled = import.meta.env.DEV;
 
 const refs = {
-    appInitStatus: document.querySelector('#app-init-status'),
-    heroActionsHost: document.querySelector('#hero-actions-host'),
-    dataActions: document.querySelector('#data-actions'),
-    dataActionsSlot: document.querySelector('#data-actions-slot'),
-    csvInput: document.querySelector('#csv-input'),
-    sqliteInput: document.querySelector('#sqlite-input'),
-    exportJson: document.querySelector('#export-json'),
-    exportSqlite: document.querySelector('#export-sqlite'),
-    raceSelect: document.querySelector('#race-select'),
-    driverFilter: document.querySelector('#driver-filter'),
-    searchFilter: document.querySelector('#search-filter'),
-    lapMin: document.querySelector('#lap-min'),
-    lapMax: document.querySelector('#lap-max'),
-    summaryGreenOnly: document.querySelector('#summary-green-only'),
-    importStatus: document.querySelector('#import-status'),
-    summaryCards: document.querySelector('#summary-cards'),
-    tableBody: document.querySelector('#lap-table-body'),
-    table: document.querySelector('table'),
-    helperContainer: document.querySelector('#annotation-helper-container'),
-    annotationPanelContainer: document.querySelector('#annotation-panel-container'),
-    timelineContainer: document.querySelector('#timeline-container'),
-    dataTabButton: document.querySelector('#data-tab-button'),
-    tabButtons: document.querySelectorAll('.tab-button'),
-    tabContents: document.querySelectorAll('.tab-content'),
-    annotationSubtabButtons: document.querySelectorAll('.annotation-subtab-button'),
-    annotationSubtabContents: document.querySelectorAll('.annotation-subtab-content'),
+  appInitStatus: document.querySelector('#app-init-status'),
+  heroActionsHost: document.querySelector('#hero-actions-host'),
+  dataActions: document.querySelector('#data-actions'),
+  dataActionsSlot: document.querySelector('#data-actions-slot'),
+  csvInput: document.querySelector('#csv-input'),
+  sqliteInput: document.querySelector('#sqlite-input'),
+  exportJson: document.querySelector('#export-json'),
+  exportSqlite: document.querySelector('#export-sqlite'),
+  raceSelect: document.querySelector('#race-select'),
+  driverFilter: document.querySelector('#driver-filter'),
+  searchFilter: document.querySelector('#search-filter'),
+  lapMin: document.querySelector('#lap-min'),
+  lapMax: document.querySelector('#lap-max'),
+  summaryGreenOnly: document.querySelector('#summary-green-only'),
+  importStatus: document.querySelector('#import-status'),
+  summaryCards: document.querySelector('#summary-cards'),
+  tableBody: document.querySelector('#lap-table-body'),
+  table: document.querySelector('table'),
+  helperContainer: document.querySelector('#annotation-helper-container'),
+  annotationPanelContainer: document.querySelector(
+    '#annotation-panel-container',
+  ),
+  timelineContainer: document.querySelector('#timeline-container'),
+  dataTabButton: document.querySelector('#data-tab-button'),
+  tabButtons: document.querySelectorAll('.tab-button'),
+  tabContents: document.querySelectorAll('.tab-content'),
+  annotationSubtabButtons: document.querySelectorAll(
+    '.annotation-subtab-button',
+  ),
+  annotationSubtabContents: document.querySelectorAll(
+    '.annotation-subtab-content',
+  ),
 };
 
 const state = {
-    db: null,
-    annotationStore: null,
-    races: [],
-    activeRaceId: '',
-    selectedLapId: '',
-    sort: {
-        column: 'lap_number',
-        direction: 'asc',
-    },
-    currentRows: [],
-    currentAnnotations: {
-        lapNotes: [],
-        taggedIncidents: [],
-        rangeEvents: [],
-        driverStints: [],
-        journalEntries: [],
-    },
-    currentTimelineEvents: [],
-    helperMode: false,
-    helperCurrentIndex: 0,
-    helperAutoAdvance: false,
-    helperViewMode: 'queue', // 'queue' or 'form'
-    lapRangeBounds: null,
-    lapRangeRaceId: '',
-    summaryGreenOnly: true,
+  db: null,
+  annotationStore: null,
+  races: [],
+  activeRaceId: '',
+  selectedLapId: '',
+  sort: {
+    column: 'lap_number',
+    direction: 'asc',
+  },
+  currentRows: [],
+  currentAnnotations: {
+    lapNotes: [],
+    taggedIncidents: [],
+    rangeEvents: [],
+    driverStints: [],
+    journalEntries: [],
+  },
+  currentTimelineEvents: [],
+  helperMode: false,
+  helperCurrentIndex: 0,
+  helperAutoAdvance: false,
+  helperViewMode: 'queue', // 'queue' or 'form'
+  lapRangeBounds: null,
+  lapRangeRaceId: '',
+  summaryGreenOnly: true,
 };
 
 const charts = {
-    lapTime: null,
+  lapTime: null,
 };
 
 let chartModulesPromise = null;
@@ -94,776 +104,890 @@ let annotationPanel = null;
 let timelineView = null;
 
 async function ensureChartModules() {
-    if (!chartModulesPromise) {
-        chartModulesPromise = Promise.all([
-            import('./features/charts/lapTimeChart.js'),
-            import('./features/dashboard/summaryCards.js'),
-        ]).then(([lapTimeChartModule, summaryCardsModule]) => {
-            createLapTimeChart = lapTimeChartModule.createLapTimeChart;
-            renderSummaryCards = summaryCardsModule.renderSummaryCards;
-        });
-    }
+  if (!chartModulesPromise) {
+    chartModulesPromise = Promise.all([
+      import('./features/charts/lapTimeChart.js'),
+      import('./features/dashboard/summaryCards.js'),
+    ]).then(([lapTimeChartModule, summaryCardsModule]) => {
+      createLapTimeChart = lapTimeChartModule.createLapTimeChart;
+      renderSummaryCards = summaryCardsModule.renderSummaryCards;
+    });
+  }
 
-    await chartModulesPromise;
+  await chartModulesPromise;
 }
 
 async function ensureLapTimeChart() {
-    if (charts.lapTime) {
-        return charts.lapTime;
-    }
-
-    await ensureChartModules();
-    charts.lapTime = createLapTimeChart(document.querySelector('#lap-time-chart'), {
-        onSelectLap: handleLapSelectionByNumber,
-        onLapRangeChange: handleLapRangeZoom,
-    });
-
+  if (charts.lapTime) {
     return charts.lapTime;
+  }
+
+  await ensureChartModules();
+  charts.lapTime = createLapTimeChart(
+    document.querySelector('#lap-time-chart'),
+    {
+      onSelectLap: handleLapSelectionByNumber,
+      onLapRangeChange: handleLapRangeZoom,
+    },
+  );
+
+  return charts.lapTime;
 }
 
 async function renderSummaryCardsLazy(summary, lapRows, options) {
-    await ensureChartModules();
-    renderSummaryCards(refs.summaryCards, summary, lapRows, options);
+  await ensureChartModules();
+  renderSummaryCards(refs.summaryCards, summary, lapRows, options);
 }
 
 function createAnnotationHandlers({ autoAdvanceOnSave = false } = {}) {
-    return {
-        onSave: async (kind, payload) => {
-            if (!state.activeRaceId) {
-                setStatus('Import a race before saving annotations.');
-                return false;
+  return {
+    onSave: async (kind, payload) => {
+      if (!state.activeRaceId) {
+        setStatus('Import a race before saving annotations.');
+        return false;
+      }
+
+      try {
+        await state.annotationStore.save(kind, {
+          ...payload,
+          race_id: state.activeRaceId,
+        });
+        setStatus('Annotation saved.');
+
+        if (autoAdvanceOnSave && state.helperAutoAdvance) {
+          const candidates = getCandidates(state.db, state.activeRaceId);
+          const annotations = getRaceAnnotations(state.db, state.activeRaceId);
+          const augmented = candidates.map((candidate) =>
+            augmentCandidateWithReviewStatus(
+              candidate,
+              annotations,
+              state.db,
+              state.activeRaceId,
+            ),
+          );
+
+          for (
+            let i = state.helperCurrentIndex + 1;
+            i < augmented.length;
+            i++
+          ) {
+            if (!augmented[i].isReviewed) {
+              state.helperCurrentIndex = i;
+              break;
             }
+          }
+        }
 
-            try {
-                await state.annotationStore.save(kind, { ...payload, race_id: state.activeRaceId });
-                setStatus('Annotation saved.');
-
-                if (autoAdvanceOnSave && state.helperAutoAdvance) {
-                    const candidates = getCandidates(state.db, state.activeRaceId);
-                    const annotations = getRaceAnnotations(state.db, state.activeRaceId);
-                    const augmented = candidates.map((candidate) => augmentCandidateWithReviewStatus(candidate, annotations, state.db, state.activeRaceId));
-
-                    for (let i = state.helperCurrentIndex + 1; i < augmented.length; i++) {
-                        if (!augmented[i].isReviewed) {
-                            state.helperCurrentIndex = i;
-                            break;
-                        }
-                    }
-                }
-
-                await refreshView();
-                return true;
-            } catch (error) {
-                console.error(error);
-                setStatus(`Unable to save annotation: ${error.message}`);
-                return false;
-            }
-        },
-        onDelete: async (kind, id) => {
-            try {
-                await state.annotationStore.remove(kind, id);
-                setStatus('Annotation removed.');
-                await refreshView();
-            } catch (error) {
-                console.error(error);
-                setStatus(`Unable to remove annotation: ${error.message}`);
-            }
-        },
-    };
+        await refreshView();
+        return true;
+      } catch (error) {
+        console.error(error);
+        setStatus(`Unable to save annotation: ${error.message}`);
+        return false;
+      }
+    },
+    onDelete: async (kind, id) => {
+      try {
+        await state.annotationStore.remove(kind, id);
+        setStatus('Annotation removed.');
+        await refreshView();
+      } catch (error) {
+        console.error(error);
+        setStatus(`Unable to remove annotation: ${error.message}`);
+      }
+    },
+  };
 }
 
 initialize().catch((error) => {
-    console.error(error);
-    setStatus(`Initialization failed: ${error.message}`);
-    setAppLoadingState(false);
+  console.error(error);
+  setStatus(`Initialization failed: ${error.message}`);
+  setAppLoadingState(false);
 });
 
 async function initialize() {
-    setAppLoadingState(true);
-    setStatus('Initializing browser SQLite cache...');
-    state.db = await new SQLiteClient().init();
-    state.annotationStore = createAnnotationStore(state.db);
+  setAppLoadingState(true);
+  setStatus('Initializing browser SQLite cache...');
+  state.db = await new SQLiteClient().init();
+  state.annotationStore = createAnnotationStore(state.db);
 
-    // Restore helper state from localStorage
-    state.helperAutoAdvance = localStorage.getItem('helperAutoAdvance') === '1';
-    const persistedSummaryGreenOnly = localStorage.getItem('summaryGreenOnly');
-    state.summaryGreenOnly = persistedSummaryGreenOnly == null ? true : persistedSummaryGreenOnly === '1';
-    if (refs.summaryGreenOnly) {
-        refs.summaryGreenOnly.checked = state.summaryGreenOnly;
-    }
+  // Restore helper state from localStorage
+  state.helperAutoAdvance = localStorage.getItem('helperAutoAdvance') === '1';
+  const persistedSummaryGreenOnly = localStorage.getItem('summaryGreenOnly');
+  state.summaryGreenOnly =
+    persistedSummaryGreenOnly == null
+      ? true
+      : persistedSummaryGreenOnly === '1';
+  if (refs.summaryGreenOnly) {
+    refs.summaryGreenOnly.checked = state.summaryGreenOnly;
+  }
 
-    // Initialize annotation helper
-    const helperContainer = refs.helperContainer;
-    if (helperContainer) {
-        annotationHelper = mountAnnotationHelper(helperContainer, {
-            ...createAnnotationHandlers({ autoAdvanceOnSave: true }),
-            onOpenComposer: (kind, options) => {
-                annotationPanel?.openComposer(kind, options);
-            },
-            onOpenEditor: (kind, id) => {
-                annotationPanel?.openEditor(kind, id);
-            },
-            onNavigate: (direction) => {
-                const candidates = getCandidates(state.db, state.activeRaceId);
-                if (!candidates.length) {
-                    return;
-                }
+  // Initialize annotation helper
+  const helperContainer = refs.helperContainer;
+  if (helperContainer) {
+    annotationHelper = mountAnnotationHelper(helperContainer, {
+      ...createAnnotationHandlers({ autoAdvanceOnSave: true }),
+      onOpenComposer: (kind, options) => {
+        annotationPanel?.openComposer(kind, options);
+      },
+      onOpenEditor: (kind, id) => {
+        annotationPanel?.openEditor(kind, id);
+      },
+      onNavigate: (direction) => {
+        const candidates = getCandidates(state.db, state.activeRaceId);
+        if (!candidates.length) {
+          return;
+        }
 
-                const annotations = getRaceAnnotations(state.db, state.activeRaceId);
-                const augmented = candidates.map((c) => augmentCandidateWithReviewStatus(c, annotations, state.db, state.activeRaceId));
+        const annotations = getRaceAnnotations(state.db, state.activeRaceId);
+        const augmented = candidates.map((c) =>
+          augmentCandidateWithReviewStatus(
+            c,
+            annotations,
+            state.db,
+            state.activeRaceId,
+          ),
+        );
 
-                if (direction === 'prev') {
-                    if (state.helperCurrentIndex > 0) {
-                        state.helperCurrentIndex--;
-                    }
-                } else if (direction === 'next') {
-                    if (state.helperCurrentIndex < augmented.length - 1) {
-                        state.helperCurrentIndex++;
-                    }
-                } else if (direction === 'jump-unresolved') {
-                    // Jump to first unreviewed candidate
-                    const nextUnreviewed = augmented.findIndex((c, i) => i > state.helperCurrentIndex && !c.isReviewed);
-                    if (nextUnreviewed >= 0) {
-                        state.helperCurrentIndex = nextUnreviewed;
-                    } else {
-                        // Wrap around to find first unreviewed from beginning
-                        const firstUnreviewed = augmented.findIndex((c) => !c.isReviewed);
-                        if (firstUnreviewed >= 0) {
-                            state.helperCurrentIndex = firstUnreviewed;
-                        }
-                    }
-                }
+        if (direction === 'prev') {
+          if (state.helperCurrentIndex > 0) {
+            state.helperCurrentIndex--;
+          }
+        } else if (direction === 'next') {
+          if (state.helperCurrentIndex < augmented.length - 1) {
+            state.helperCurrentIndex++;
+          }
+        } else if (direction === 'jump-unresolved') {
+          // Jump to first unreviewed candidate
+          const nextUnreviewed = augmented.findIndex(
+            (c, i) => i > state.helperCurrentIndex && !c.isReviewed,
+          );
+          if (nextUnreviewed >= 0) {
+            state.helperCurrentIndex = nextUnreviewed;
+          } else {
+            // Wrap around to find first unreviewed from beginning
+            const firstUnreviewed = augmented.findIndex((c) => !c.isReviewed);
+            if (firstUnreviewed >= 0) {
+              state.helperCurrentIndex = firstUnreviewed;
+            }
+          }
+        }
 
-                refreshView();
-            },
-            onToggleAutoAdvance: () => {
-                state.helperAutoAdvance = !state.helperAutoAdvance;
-                localStorage.setItem('helperAutoAdvance', state.helperAutoAdvance ? '1' : '0');
-                refreshView();
-            },
-        });
-    }
+        refreshView();
+      },
+      onToggleAutoAdvance: () => {
+        state.helperAutoAdvance = !state.helperAutoAdvance;
+        localStorage.setItem(
+          'helperAutoAdvance',
+          state.helperAutoAdvance ? '1' : '0',
+        );
+        refreshView();
+      },
+    });
+  }
 
-    if (refs.annotationPanelContainer) {
-        annotationPanel = mountAnnotationPanel(refs.annotationPanelContainer, createAnnotationHandlers());
-    }
+  if (refs.annotationPanelContainer) {
+    annotationPanel = mountAnnotationPanel(
+      refs.annotationPanelContainer,
+      createAnnotationHandlers(),
+    );
+  }
 
-    if (refs.timelineContainer) {
-        timelineView = mountTimelineView(refs.timelineContainer, {
-            ...createAnnotationHandlers(),
-            onSelectLap: handleLapSelectionByNumber,
-            isLocalEditingEnabled,
-        });
-    }
+  if (refs.timelineContainer) {
+    timelineView = mountTimelineView(refs.timelineContainer, {
+      ...createAnnotationHandlers(),
+      onSelectLap: handleLapSelectionByNumber,
+      isLocalEditingEnabled,
+    });
+  }
 
-    wireEvents();
-    await refreshRaceOptions();
-    await refreshView();
-    if (state.db.didRefreshBundledDatabase) {
-        setAppLoadingState(false);
-        setStatus('Ready. Detected a newer deployment and refreshed the local bundled database cache.');
-        return;
-    }
-
+  wireEvents();
+  await refreshRaceOptions();
+  await refreshView();
+  if (state.db.didRefreshBundledDatabase) {
     setAppLoadingState(false);
-    setStatus('Ready. Import lap CSV files or restore a SQLite export to begin.');
+    setStatus(
+      'Ready. Detected a newer deployment and refreshed the local bundled database cache.',
+    );
+    return;
+  }
+
+  setAppLoadingState(false);
+  setStatus('Ready. Import lap CSV files or restore a SQLite export to begin.');
 }
 
-
 function wireEvents() {
-    refs.csvInput.addEventListener('change', handleImport);
-    refs.sqliteInput.addEventListener('change', handleRestoreSqlite);
-    refs.raceSelect.addEventListener('change', async (event) => {
-        state.activeRaceId = event.target.value;
-        state.selectedLapId = '';
-        await refreshDriverOptions();
-        await refreshView();
-    });
-    refs.driverFilter.addEventListener('change', refreshView);
-    refs.searchFilter.addEventListener('input', refreshView);
-    refs.lapMin.addEventListener('input', () => handleLapRangeInput('lapMin'));
-    refs.lapMax.addEventListener('input', () => handleLapRangeInput('lapMax'));
-    refs.summaryGreenOnly.addEventListener('change', async (event) => {
-        state.summaryGreenOnly = event.target.checked;
-        localStorage.setItem('summaryGreenOnly', state.summaryGreenOnly ? '1' : '0');
-        await refreshView();
-    });
-    refs.exportJson.addEventListener('click', () => {
-        if (state.activeRaceId) {
-            exportAnnotationsFile(state.db, state.activeRaceId);
-        }
-    });
-    refs.exportSqlite.addEventListener('click', () => {
-        const activeRace = state.races.find((race) => race.id === state.activeRaceId);
-        exportDatabaseFile(state.db, activeRace?.name || 'lemons-race-viewer');
-    });
-    refs.table.querySelector('thead').addEventListener('click', async (event) => {
-        const header = event.target.closest('th[data-sort]');
-        if (!header) {
-            return;
-        }
+  refs.csvInput.addEventListener('change', handleImport);
+  refs.sqliteInput.addEventListener('change', handleRestoreSqlite);
+  refs.raceSelect.addEventListener('change', async (event) => {
+    state.activeRaceId = event.target.value;
+    state.selectedLapId = '';
+    await refreshDriverOptions();
+    await refreshView();
+  });
+  refs.driverFilter.addEventListener('change', refreshView);
+  refs.searchFilter.addEventListener('input', refreshView);
+  refs.lapMin.addEventListener('input', () => handleLapRangeInput('lapMin'));
+  refs.lapMax.addEventListener('input', () => handleLapRangeInput('lapMax'));
+  refs.summaryGreenOnly.addEventListener('change', async (event) => {
+    state.summaryGreenOnly = event.target.checked;
+    localStorage.setItem(
+      'summaryGreenOnly',
+      state.summaryGreenOnly ? '1' : '0',
+    );
+    await refreshView();
+  });
+  refs.exportJson.addEventListener('click', () => {
+    if (state.activeRaceId) {
+      exportAnnotationsFile(state.db, state.activeRaceId);
+    }
+  });
+  refs.exportSqlite.addEventListener('click', () => {
+    const activeRace = state.races.find(
+      (race) => race.id === state.activeRaceId,
+    );
+    exportDatabaseFile(state.db, activeRace?.name || 'lemons-race-viewer');
+  });
+  refs.table.querySelector('thead').addEventListener('click', async (event) => {
+    const header = event.target.closest('th[data-sort]');
+    if (!header) {
+      return;
+    }
 
-        const column = header.dataset.sort;
-        if (state.sort.column === column) {
-            state.sort.direction = state.sort.direction === 'asc' ? 'desc' : 'asc';
-        } else {
-            state.sort.column = column;
-            state.sort.direction = 'asc';
-        }
+    const column = header.dataset.sort;
+    if (state.sort.column === column) {
+      state.sort.direction = state.sort.direction === 'asc' ? 'desc' : 'asc';
+    } else {
+      state.sort.column = column;
+      state.sort.direction = 'asc';
+    }
 
-        await refreshView();
-    });
-    refs.tableBody.addEventListener('click', async (event) => {
-        const row = event.target.closest('tr[data-lap-id]');
-        if (!row) {
-            return;
-        }
+    await refreshView();
+  });
+  refs.tableBody.addEventListener('click', async (event) => {
+    const row = event.target.closest('tr[data-lap-id]');
+    if (!row) {
+      return;
+    }
 
-        const selectedRow = state.currentRows.find((item) => item.id === row.dataset.lapId);
-        if (!selectedRow) {
-            return;
-        }
+    const selectedRow = state.currentRows.find(
+      (item) => item.id === row.dataset.lapId,
+    );
+    if (!selectedRow) {
+      return;
+    }
 
-        await selectLapAndOpenDetails(selectedRow);
-    });
-    window.addEventListener('resize', () => {
-        charts.lapTime?.resize();
-    });
-    setupTabSwitching();
-    setupAnnotationSubtabs();
+    await selectLapAndOpenDetails(selectedRow);
+  });
+  window.addEventListener('resize', () => {
+    charts.lapTime?.resize();
+  });
+  setupTabSwitching();
+  setupAnnotationSubtabs();
 }
 
 function setupTabSwitching() {
-    const annotationsTabButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === 'annotations');
-    if (annotationsTabButton) {
-        annotationsTabButton.hidden = !isLocalEditingEnabled;
-    }
+  const annotationsTabButton = Array.from(refs.tabButtons).find(
+    (btn) => btn.dataset.tab === 'annotations',
+  );
+  if (annotationsTabButton) {
+    annotationsTabButton.hidden = !isLocalEditingEnabled;
+  }
 
-    refs.tabButtons.forEach((button) => {
-        button.addEventListener('click', (event) => {
-            const tabName = event.target.dataset.tab;
-            if (!tabName) return;
+  refs.tabButtons.forEach((button) => {
+    button.addEventListener('click', (event) => {
+      const tabName = event.target.dataset.tab;
+      if (!tabName) return;
 
-            // Update active button
-            refs.tabButtons.forEach((btn) => btn.classList.remove('active'));
-            event.target.classList.add('active');
+      // Update active button
+      refs.tabButtons.forEach((btn) => {
+        btn.classList.remove('active');
+      });
+      event.target.classList.add('active');
 
-            // Update active tab content
-            refs.tabContents.forEach((content) => content.classList.remove('active'));
-            const activeTab = document.querySelector(`#${tabName}-tab`);
-            if (activeTab) {
-                activeTab.classList.add('active');
-                // Trigger chart resize if showing chart tab
-                if (tabName === 'chart') {
-                    setTimeout(() => {
-                        charts.lapTime?.resize();
-                    }, 50);
-                }
-            }
+      // Update active tab content
+      refs.tabContents.forEach((content) => {
+        content.classList.remove('active');
+      });
+      const activeTab = document.querySelector(`#${tabName}-tab`);
+      if (activeTab) {
+        activeTab.classList.add('active');
+        // Trigger chart resize if showing chart tab
+        if (tabName === 'chart') {
+          setTimeout(() => {
+            charts.lapTime?.resize();
+          }, 50);
+        }
+      }
 
-            // Save preference to localStorage
-            localStorage.setItem('activeTab', tabName);
-        });
+      // Save preference to localStorage
+      localStorage.setItem('activeTab', tabName);
     });
+  });
 
-    // Restore saved tab preference
-    const savedTab = localStorage.getItem('activeTab') || 'chart';
-    const savedTabButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === savedTab && !btn.hidden);
-    if (savedTabButton) {
-        savedTabButton.click();
-    } else {
-        const chartTabButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === 'chart');
-        chartTabButton?.click();
-    }
+  // Restore saved tab preference
+  const savedTab = localStorage.getItem('activeTab') || 'chart';
+  const savedTabButton = Array.from(refs.tabButtons).find(
+    (btn) => btn.dataset.tab === savedTab && !btn.hidden,
+  );
+  if (savedTabButton) {
+    savedTabButton.click();
+  } else {
+    const chartTabButton = Array.from(refs.tabButtons).find(
+      (btn) => btn.dataset.tab === 'chart',
+    );
+    chartTabButton?.click();
+  }
 }
 
 function syncDataTabAndActions() {
-    const hasData = state.races.length > 0;
+  const hasData = state.races.length > 0;
 
-    if (refs.dataTabButton) {
-        refs.dataTabButton.hidden = !hasData;
-    }
+  if (refs.dataTabButton) {
+    refs.dataTabButton.hidden = !hasData;
+  }
 
-    const activeDataButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === 'data' && btn.classList.contains('active'));
-    if (!hasData && activeDataButton) {
-        const chartButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === 'chart');
-        chartButton?.click();
-    }
+  const activeDataButton = Array.from(refs.tabButtons).find(
+    (btn) => btn.dataset.tab === 'data' && btn.classList.contains('active'),
+  );
+  if (!hasData && activeDataButton) {
+    const chartButton = Array.from(refs.tabButtons).find(
+      (btn) => btn.dataset.tab === 'chart',
+    );
+    chartButton?.click();
+  }
 
-    const targetHost = hasData ? refs.dataActionsSlot : refs.heroActionsHost;
-    if (targetHost && refs.dataActions && refs.dataActions.parentElement !== targetHost) {
-        targetHost.append(refs.dataActions);
-    }
+  const targetHost = hasData ? refs.dataActionsSlot : refs.heroActionsHost;
+  if (
+    targetHost &&
+    refs.dataActions &&
+    refs.dataActions.parentElement !== targetHost
+  ) {
+    targetHost.append(refs.dataActions);
+  }
 
-    if (refs.heroActionsHost) {
-        refs.heroActionsHost.hidden = hasData;
-    }
+  if (refs.heroActionsHost) {
+    refs.heroActionsHost.hidden = hasData;
+  }
 }
 
 function setupAnnotationSubtabs() {
-    refs.annotationSubtabButtons.forEach((button) => {
-        button.addEventListener('click', (event) => {
-            const subtabName = event.target.dataset.annotationTab;
-            if (!subtabName) return;
+  refs.annotationSubtabButtons.forEach((button) => {
+    button.addEventListener('click', (event) => {
+      const subtabName = event.target.dataset.annotationTab;
+      if (!subtabName) return;
 
-            refs.annotationSubtabButtons.forEach((btn) => {
-                btn.classList.remove('active');
-                btn.setAttribute('aria-selected', 'false');
-            });
-            event.target.classList.add('active');
-            event.target.setAttribute('aria-selected', 'true');
+      refs.annotationSubtabButtons.forEach((btn) => {
+        btn.classList.remove('active');
+        btn.setAttribute('aria-selected', 'false');
+      });
+      event.target.classList.add('active');
+      event.target.setAttribute('aria-selected', 'true');
 
-            refs.annotationSubtabContents.forEach((content) => {
-                content.classList.remove('active');
-                content.hidden = true;
-            });
+      refs.annotationSubtabContents.forEach((content) => {
+        content.classList.remove('active');
+        content.hidden = true;
+      });
 
-            const activeSubtab = document.querySelector(`#annotation-${subtabName}-tab`);
-            if (activeSubtab) {
-                activeSubtab.classList.add('active');
-                activeSubtab.hidden = false;
-            }
+      const activeSubtab = document.querySelector(
+        `#annotation-${subtabName}-tab`,
+      );
+      if (activeSubtab) {
+        activeSubtab.classList.add('active');
+        activeSubtab.hidden = false;
+      }
 
-            localStorage.setItem('activeAnnotationSubtab', subtabName);
-        });
+      localStorage.setItem('activeAnnotationSubtab', subtabName);
     });
+  });
 
-    const savedSubtab = localStorage.getItem('activeAnnotationSubtab') || 'editor';
-    const savedSubtabButton = Array.from(refs.annotationSubtabButtons).find((btn) => btn.dataset.annotationTab === savedSubtab);
-    if (savedSubtabButton) {
-        savedSubtabButton.click();
-    }
+  const savedSubtab =
+    localStorage.getItem('activeAnnotationSubtab') || 'editor';
+  const savedSubtabButton = Array.from(refs.annotationSubtabButtons).find(
+    (btn) => btn.dataset.annotationTab === savedSubtab,
+  );
+  if (savedSubtabButton) {
+    savedSubtabButton.click();
+  }
 }
 
 async function handleImport(event) {
-    const files = Array.from(event.target.files ?? []);
-    if (!files.length) {
-        return;
+  const files = Array.from(event.target.files ?? []);
+  if (!files.length) {
+    return;
+  }
+
+  const messages = [];
+  for (const file of files) {
+    const importOptions = promptForRaceImportOptions(file.name);
+    if (importOptions.cancelled) {
+      refs.csvInput.value = '';
+      setStatus(`Import cancelled before ${file.name}.`);
+      return;
     }
 
-    const messages = [];
-    for (const file of files) {
-        const importOptions = promptForRaceImportOptions(file.name);
-        if (importOptions.cancelled) {
-            refs.csvInput.value = '';
-            setStatus(`Import cancelled before ${file.name}.`);
-            return;
-        }
+    setStatus(`Importing ${file.name}...`);
+    const result = await importRace(state.db, file, {
+      raceStartTime: importOptions.raceStartTime,
+    });
+    messages.push(
+      `${result.raceName}: ${result.rowCount} laps${result.warnings.length ? ` (${result.warnings.length} repairs/warnings)` : ''}`,
+    );
+    state.activeRaceId = result.raceId;
+  }
 
-        setStatus(`Importing ${file.name}...`);
-        const result = await importRace(state.db, file, {
-            raceStartTime: importOptions.raceStartTime,
-        });
-        messages.push(`${result.raceName}: ${result.rowCount} laps${result.warnings.length ? ` (${result.warnings.length} repairs/warnings)` : ''}`);
-        state.activeRaceId = result.raceId;
-    }
-
-    refs.csvInput.value = '';
-    await refreshRaceOptions();
-    await refreshView();
-    setStatus(`Import complete. ${messages.join(' | ')}`);
+  refs.csvInput.value = '';
+  await refreshRaceOptions();
+  await refreshView();
+  setStatus(`Import complete. ${messages.join(' | ')}`);
 }
 
 async function handleRestoreSqlite(event) {
-    const [file] = Array.from(event.target.files ?? []);
-    if (!file) {
-        return;
-    }
+  const [file] = Array.from(event.target.files ?? []);
+  if (!file) {
+    return;
+  }
 
-    try {
-        setStatus(`Restoring SQLite from ${file.name}...`);
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        await state.db.restoreDatabase(bytes);
+  try {
+    setStatus(`Restoring SQLite from ${file.name}...`);
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    await state.db.restoreDatabase(bytes);
 
-        state.activeRaceId = '';
-        state.selectedLapId = '';
-        state.helperCurrentIndex = 0;
+    state.activeRaceId = '';
+    state.selectedLapId = '';
+    state.helperCurrentIndex = 0;
 
-        refs.sqliteInput.value = '';
-        await refreshRaceOptions();
-        await refreshView();
+    refs.sqliteInput.value = '';
+    await refreshRaceOptions();
+    await refreshView();
 
-        const raceCount = state.races.length;
-        setStatus(`SQLite restore complete. Loaded ${raceCount} race${raceCount === 1 ? '' : 's'}.`);
-    } catch (error) {
-        console.error(error);
-        refs.sqliteInput.value = '';
-        setStatus(`SQLite restore failed: ${error.message}`);
-    }
+    const raceCount = state.races.length;
+    setStatus(
+      `SQLite restore complete. Loaded ${raceCount} race${raceCount === 1 ? '' : 's'}.`,
+    );
+  } catch (error) {
+    console.error(error);
+    refs.sqliteInput.value = '';
+    setStatus(`SQLite restore failed: ${error.message}`);
+  }
 }
 
 async function refreshRaceOptions() {
-    state.races = getRaceList(state.db);
-    syncDataTabAndActions();
+  state.races = getRaceList(state.db);
+  syncDataTabAndActions();
 
-    refs.raceSelect.innerHTML = state.races.length
-        ? state.races
-            .map((race) => `<option value="${race.id}">${race.name}</option>`)
-            .join('')
-        : '<option value="">No imported races</option>';
+  refs.raceSelect.innerHTML = state.races.length
+    ? state.races
+        .map((race) => `<option value="${race.id}">${race.name}</option>`)
+        .join('')
+    : '<option value="">No imported races</option>';
 
-    if (!state.activeRaceId && state.races.length) {
-        state.activeRaceId = state.races[0].id;
-    }
+  if (!state.activeRaceId && state.races.length) {
+    state.activeRaceId = state.races[0].id;
+  }
 
-    refs.raceSelect.value = state.activeRaceId;
-    await refreshDriverOptions();
+  refs.raceSelect.value = state.activeRaceId;
+  await refreshDriverOptions();
 }
 
 async function refreshDriverOptions() {
-    const selectedDriver = refs.driverFilter.value;
-    const drivers = state.activeRaceId ? getDriverOptions(state.db, state.activeRaceId) : [];
-    refs.driverFilter.innerHTML = ['<option value="">All drivers</option>', ...drivers.map((driver) => `<option value="${driver}">${driver}</option>`)].join('');
-    refs.driverFilter.value = drivers.includes(selectedDriver) ? selectedDriver : '';
+  const selectedDriver = refs.driverFilter.value;
+  const drivers = state.activeRaceId
+    ? getDriverOptions(state.db, state.activeRaceId)
+    : [];
+  refs.driverFilter.innerHTML = [
+    '<option value="">All drivers</option>',
+    ...drivers.map((driver) => `<option value="${driver}">${driver}</option>`),
+  ].join('');
+  refs.driverFilter.value = drivers.includes(selectedDriver)
+    ? selectedDriver
+    : '';
 }
 
 async function refreshView(options = {}) {
-    const { skipChartRender = false } = options;
-    updateSortIndicators(refs.table, state.sort);
+  const { skipChartRender = false } = options;
+  updateSortIndicators(refs.table, state.sort);
 
-    if (!state.activeRaceId) {
-        state.lapRangeBounds = null;
-        state.lapRangeRaceId = '';
-        syncLapRangeInputs(null, { prefill: false });
-        refs.summaryCards.innerHTML = '<div class="summary-card"><span>No race selected</span><strong>Import a CSV</strong></div>';
-        renderLapTable(refs.tableBody, [], state.selectedLapId, null);
-        state.currentAnnotations = {
-            lapNotes: [],
-            taggedIncidents: [],
-            rangeEvents: [],
-            driverStints: [],
-            journalEntries: [],
-        };
-        state.currentTimelineEvents = [];
-        if (annotationHelper) {
-            annotationHelper.render(null);
-        }
-        if (annotationPanel) {
-            annotationPanel.render({
-                selectedLapRow: null,
-                rows: [],
-                raceStartTime: null,
-                annotations: {
-                    lapNotes: [],
-                    taggedIncidents: [],
-                    rangeEvents: [],
-                    driverStints: [],
-                    journalEntries: [],
-                },
-            });
-        }
-        if (timelineView) {
-            timelineView.render(null);
-        }
-        return;
-    }
-
-    const baseFilters = getBaseFilters();
-    const chartFilters = {
-        ...baseFilters,
-        lapMin: null,
-        lapMax: null,
+  if (!state.activeRaceId) {
+    state.lapRangeBounds = null;
+    state.lapRangeRaceId = '';
+    syncLapRangeInputs(null, { prefill: false });
+    refs.summaryCards.innerHTML =
+      '<div class="summary-card"><span>No race selected</span><strong>Import a CSV</strong></div>';
+    renderLapTable(refs.tableBody, [], state.selectedLapId, null);
+    state.currentAnnotations = {
+      lapNotes: [],
+      taggedIncidents: [],
+      rangeEvents: [],
+      driverStints: [],
+      journalEntries: [],
     };
-    const lapSeries = getLapSeries(state.db, state.activeRaceId, chartFilters);
-    const lapRangeBounds = getLapBounds(lapSeries);
-    state.lapRangeBounds = lapRangeBounds;
-    const forceToBounds = state.lapRangeRaceId !== state.activeRaceId;
-    const { lapMin, lapMax } = syncLapRangeInputs(lapRangeBounds, { prefill: true, forceToBounds });
-    state.lapRangeRaceId = state.activeRaceId;
-    const filters = {
-        ...baseFilters,
-        lapMin,
-        lapMax,
-    };
-
-    const rows = getLapTableRows(state.db, state.activeRaceId, filters, state.sort);
-    const summary = getSummary(state.db, state.activeRaceId, filters);
-    const annotations = getRaceAnnotations(state.db, state.activeRaceId);
-    const timelineEvents = getRaceTimelineEvents(state.db, state.activeRaceId);
-
-    state.currentRows = rows;
-    state.currentAnnotations = annotations;
-    state.currentTimelineEvents = timelineEvents;
-    if (state.selectedLapId && !rows.some((row) => row.id === state.selectedLapId)) {
-        state.selectedLapId = '';
-    }
-
-    await renderSummaryCardsLazy(summary, rows, {
-        greenFlagOnly: state.summaryGreenOnly,
-    });
-    const activeRace = state.races.find((race) => race.id === state.activeRaceId);
-    renderLapTable(refs.tableBody, rows, state.selectedLapId, activeRace?.race_start_time ?? null);
-
-    if (!skipChartRender) {
-        const lapTimeChart = await ensureLapTimeChart();
-        lapTimeChart.render(lapSeries, annotations);
-        lapTimeChart.setLapRange(filters.lapMin, filters.lapMax);
-    }
-    // BUG FIX: charts.position was initialized but render() was never defined. Skip for now.
-    // charts.position.render(lapSeries, annotations, null);
-
-    const selectedLapRow = rows.find((row) => row.id === state.selectedLapId) ?? null;
-
-    // Helper view: compute candidate queue and augmented review status
+    state.currentTimelineEvents = [];
     if (annotationHelper) {
-        const candidates = getCandidates(state.db, state.activeRaceId);
-        const raceSnapshot = getRaceSnapshot(state.db, state.activeRaceId);
-        const lapStartOffsets = new Map(
-            raceSnapshot.laps.map((lap) => [lap.lap_number, lap.lap_start_offset_ms ?? 0]),
-        );
-
-        // Augment candidates with review status and lap_start_offset_ms
-        const augmentedCandidates = candidates.map((candidate) => {
-            const reviewed = augmentCandidateWithReviewStatus(candidate, annotations, state.db, state.activeRaceId);
-
-            return {
-                ...reviewed,
-                lap_start_offset_ms: lapStartOffsets.get(candidate.lap_number) ?? 0,
-            };
-        });
-
-        annotationHelper.render({
-            candidates: augmentedCandidates,
-            currentIndex: state.helperCurrentIndex,
-            selectedLapId: state.selectedLapId,
-            selectedLapRow,
-            annotations,
-            autoAdvance: state.helperAutoAdvance,
-            filterContext: filters,
-            raceStartTime: activeRace?.race_start_time ?? null,
-        });
+      annotationHelper.render(null);
     }
-
     if (annotationPanel) {
-        annotationPanel.render({
-            selectedLapRow,
-            rows,
-            raceStartTime: activeRace?.race_start_time ?? null,
-            annotations,
-        });
+      annotationPanel.render({
+        selectedLapRow: null,
+        rows: [],
+        raceStartTime: null,
+        annotations: {
+          lapNotes: [],
+          taggedIncidents: [],
+          rangeEvents: [],
+          driverStints: [],
+          journalEntries: [],
+        },
+      });
     }
-
     if (timelineView) {
-        timelineView.render({
-            timelineEvents,
-            journalEntries: annotations.journalEntries || [],
-            selectedLapRow,
-            raceStartTime: activeRace?.race_start_time ?? null,
-        });
+      timelineView.render(null);
     }
+    return;
+  }
+
+  const baseFilters = getBaseFilters();
+  const chartFilters = {
+    ...baseFilters,
+    lapMin: null,
+    lapMax: null,
+  };
+  const lapSeries = getLapSeries(state.db, state.activeRaceId, chartFilters);
+  const lapRangeBounds = getLapBounds(lapSeries);
+  state.lapRangeBounds = lapRangeBounds;
+  const forceToBounds = state.lapRangeRaceId !== state.activeRaceId;
+  const { lapMin, lapMax } = syncLapRangeInputs(lapRangeBounds, {
+    prefill: true,
+    forceToBounds,
+  });
+  state.lapRangeRaceId = state.activeRaceId;
+  const filters = {
+    ...baseFilters,
+    lapMin,
+    lapMax,
+  };
+
+  const rows = getLapTableRows(
+    state.db,
+    state.activeRaceId,
+    filters,
+    state.sort,
+  );
+  const summary = getSummary(state.db, state.activeRaceId, filters);
+  const annotations = getRaceAnnotations(state.db, state.activeRaceId);
+  const timelineEvents = getRaceTimelineEvents(state.db, state.activeRaceId);
+
+  state.currentRows = rows;
+  state.currentAnnotations = annotations;
+  state.currentTimelineEvents = timelineEvents;
+  if (
+    state.selectedLapId &&
+    !rows.some((row) => row.id === state.selectedLapId)
+  ) {
+    state.selectedLapId = '';
+  }
+
+  await renderSummaryCardsLazy(summary, rows, {
+    greenFlagOnly: state.summaryGreenOnly,
+  });
+  const activeRace = state.races.find((race) => race.id === state.activeRaceId);
+  renderLapTable(
+    refs.tableBody,
+    rows,
+    state.selectedLapId,
+    activeRace?.race_start_time ?? null,
+  );
+
+  if (!skipChartRender) {
+    const lapTimeChart = await ensureLapTimeChart();
+    lapTimeChart.render(lapSeries, annotations);
+    lapTimeChart.setLapRange(filters.lapMin, filters.lapMax);
+  }
+  // BUG FIX: charts.position was initialized but render() was never defined. Skip for now.
+  // charts.position.render(lapSeries, annotations, null);
+
+  const selectedLapRow =
+    rows.find((row) => row.id === state.selectedLapId) ?? null;
+
+  // Helper view: compute candidate queue and augmented review status
+  if (annotationHelper) {
+    const candidates = getCandidates(state.db, state.activeRaceId);
+    const raceSnapshot = getRaceSnapshot(state.db, state.activeRaceId);
+    const lapStartOffsets = new Map(
+      raceSnapshot.laps.map((lap) => [
+        lap.lap_number,
+        lap.lap_start_offset_ms ?? 0,
+      ]),
+    );
+
+    // Augment candidates with review status and lap_start_offset_ms
+    const augmentedCandidates = candidates.map((candidate) => {
+      const reviewed = augmentCandidateWithReviewStatus(
+        candidate,
+        annotations,
+        state.db,
+        state.activeRaceId,
+      );
+
+      return {
+        ...reviewed,
+        lap_start_offset_ms: lapStartOffsets.get(candidate.lap_number) ?? 0,
+      };
+    });
+
+    annotationHelper.render({
+      candidates: augmentedCandidates,
+      currentIndex: state.helperCurrentIndex,
+      selectedLapId: state.selectedLapId,
+      selectedLapRow,
+      annotations,
+      autoAdvance: state.helperAutoAdvance,
+      filterContext: filters,
+      raceStartTime: activeRace?.race_start_time ?? null,
+    });
+  }
+
+  if (annotationPanel) {
+    annotationPanel.render({
+      selectedLapRow,
+      rows,
+      raceStartTime: activeRace?.race_start_time ?? null,
+      annotations,
+    });
+  }
+
+  if (timelineView) {
+    timelineView.render({
+      timelineEvents,
+      journalEntries: annotations.journalEntries || [],
+      selectedLapRow,
+      raceStartTime: activeRace?.race_start_time ?? null,
+    });
+  }
 }
 
 async function handleLapRangeZoom({ lapMin, lapMax }) {
-    const currentMin = parseIntegerOrNull(refs.lapMin.value);
-    const currentMax = parseIntegerOrNull(refs.lapMax.value);
-    const nextMin = Number.isFinite(lapMin) ? Math.round(lapMin) : null;
-    const nextMax = Number.isFinite(lapMax) ? Math.round(lapMax) : null;
+  const currentMin = parseIntegerOrNull(refs.lapMin.value);
+  const currentMax = parseIntegerOrNull(refs.lapMax.value);
+  const nextMin = Number.isFinite(lapMin) ? Math.round(lapMin) : null;
+  const nextMax = Number.isFinite(lapMax) ? Math.round(lapMax) : null;
 
-    const isSameMin = (Number.isFinite(currentMin) ? currentMin : null) === nextMin;
-    const isSameMax = (Number.isFinite(currentMax) ? currentMax : null) === nextMax;
-    if (isSameMin && isSameMax) {
-        return;
-    }
+  const isSameMin =
+    (Number.isFinite(currentMin) ? currentMin : null) === nextMin;
+  const isSameMax =
+    (Number.isFinite(currentMax) ? currentMax : null) === nextMax;
+  if (isSameMin && isSameMax) {
+    return;
+  }
 
-    refs.lapMin.value = nextMin == null ? '' : `${nextMin}`;
-    refs.lapMax.value = nextMax == null ? '' : `${nextMax}`;
-    syncLapRangeInputs(state.lapRangeBounds, { prefill: true });
-    await refreshView({ skipChartRender: true });
+  refs.lapMin.value = nextMin == null ? '' : `${nextMin}`;
+  refs.lapMax.value = nextMax == null ? '' : `${nextMax}`;
+  syncLapRangeInputs(state.lapRangeBounds, { prefill: true });
+  await refreshView({ skipChartRender: true });
 }
 
 async function handleLapRangeInput(changedField) {
-    syncLapRangeInputs(state.lapRangeBounds, { prefill: true, changedField });
-    await refreshView();
+  syncLapRangeInputs(state.lapRangeBounds, { prefill: true, changedField });
+  await refreshView();
 }
 
 function getBaseFilters() {
-    return {
-        driver: refs.driverFilter.value,
-        search: refs.searchFilter.value.trim(),
-    };
+  return {
+    driver: refs.driverFilter.value,
+    search: refs.searchFilter.value.trim(),
+  };
 }
 
 function getLapBounds(rows) {
-    if (!Array.isArray(rows) || !rows.length) {
-        return null;
-    }
+  if (!Array.isArray(rows) || !rows.length) {
+    return null;
+  }
 
-    const lapNumbers = rows
-        .map((row) => Number(row.lap_number))
-        .filter((lapNumber) => Number.isFinite(lapNumber));
+  const lapNumbers = rows
+    .map((row) => Number(row.lap_number))
+    .filter((lapNumber) => Number.isFinite(lapNumber));
 
-    if (!lapNumbers.length) {
-        return null;
-    }
+  if (!lapNumbers.length) {
+    return null;
+  }
 
-    return {
-        min: Math.min(...lapNumbers),
-        max: Math.max(...lapNumbers),
-    };
+  return {
+    min: Math.min(...lapNumbers),
+    max: Math.max(...lapNumbers),
+  };
 }
 
 function syncLapRangeInputs(bounds, options = {}) {
-    const { prefill = false, changedField = null, forceToBounds = false } = options;
+  const {
+    prefill = false,
+    changedField = null,
+    forceToBounds = false,
+  } = options;
 
-    if (!bounds || !Number.isFinite(bounds.min) || !Number.isFinite(bounds.max)) {
-        refs.lapMin.removeAttribute('min');
-        refs.lapMin.removeAttribute('max');
-        refs.lapMax.removeAttribute('min');
-        refs.lapMax.removeAttribute('max');
-        return { lapMin: null, lapMax: null };
+  if (!bounds || !Number.isFinite(bounds.min) || !Number.isFinite(bounds.max)) {
+    refs.lapMin.removeAttribute('min');
+    refs.lapMin.removeAttribute('max');
+    refs.lapMax.removeAttribute('min');
+    refs.lapMax.removeAttribute('max');
+    return { lapMin: null, lapMax: null };
+  }
+
+  refs.lapMin.min = `${bounds.min}`;
+  refs.lapMin.max = `${bounds.max}`;
+  refs.lapMax.min = `${bounds.min}`;
+  refs.lapMax.max = `${bounds.max}`;
+
+  let lapMin = parseIntegerOrNull(refs.lapMin.value);
+  let lapMax = parseIntegerOrNull(refs.lapMax.value);
+
+  if (forceToBounds) {
+    lapMin = bounds.min;
+    lapMax = bounds.max;
+  }
+
+  if (prefill && lapMin == null) {
+    lapMin = bounds.min;
+  }
+
+  if (prefill && lapMax == null) {
+    lapMax = bounds.max;
+  }
+
+  if (lapMin != null) {
+    lapMin = clamp(lapMin, bounds.min, bounds.max);
+  }
+
+  if (lapMax != null) {
+    lapMax = clamp(lapMax, bounds.min, bounds.max);
+  }
+
+  if (lapMin != null && lapMax != null && lapMin > lapMax) {
+    if (changedField === 'lapMin') {
+      lapMax = lapMin;
+    } else if (changedField === 'lapMax') {
+      lapMin = lapMax;
+    } else {
+      lapMin = bounds.min;
+      lapMax = bounds.max;
     }
+  }
 
-    refs.lapMin.min = `${bounds.min}`;
-    refs.lapMin.max = `${bounds.max}`;
-    refs.lapMax.min = `${bounds.min}`;
-    refs.lapMax.max = `${bounds.max}`;
+  refs.lapMin.value = lapMin == null ? '' : `${lapMin}`;
+  refs.lapMax.value = lapMax == null ? '' : `${lapMax}`;
 
-    let lapMin = parseIntegerOrNull(refs.lapMin.value);
-    let lapMax = parseIntegerOrNull(refs.lapMax.value);
-
-    if (forceToBounds) {
-        lapMin = bounds.min;
-        lapMax = bounds.max;
-    }
-
-    if (prefill && lapMin == null) {
-        lapMin = bounds.min;
-    }
-
-    if (prefill && lapMax == null) {
-        lapMax = bounds.max;
-    }
-
-    if (lapMin != null) {
-        lapMin = clamp(lapMin, bounds.min, bounds.max);
-    }
-
-    if (lapMax != null) {
-        lapMax = clamp(lapMax, bounds.min, bounds.max);
-    }
-
-    if (lapMin != null && lapMax != null && lapMin > lapMax) {
-        if (changedField === 'lapMin') {
-            lapMax = lapMin;
-        } else if (changedField === 'lapMax') {
-            lapMin = lapMax;
-        } else {
-            lapMin = bounds.min;
-            lapMax = bounds.max;
-        }
-    }
-
-    refs.lapMin.value = lapMin == null ? '' : `${lapMin}`;
-    refs.lapMax.value = lapMax == null ? '' : `${lapMax}`;
-
-    return { lapMin, lapMax };
+  return { lapMin, lapMax };
 }
 
 function parseIntegerOrNull(value) {
-    const parsed = Number.parseInt(value, 10);
-    return Number.isFinite(parsed) ? parsed : null;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
-}
-
-function handleLapSelection(lapId) {
-    state.selectedLapId = lapId || '';
-    refreshView();
+  return Math.max(min, Math.min(max, value));
 }
 
 async function handleLapSelectionByNumber(lapNumber) {
-    const selectedRow = state.currentRows.find((row) => row.lap_number === lapNumber);
-    if (selectedRow) {
-        await selectLapAndOpenDetails(selectedRow);
-    }
+  const selectedRow = state.currentRows.find(
+    (row) => row.lap_number === lapNumber,
+  );
+  if (selectedRow) {
+    await selectLapAndOpenDetails(selectedRow);
+  }
 
-    // Scroll table to the clicked lap
-    scrollToLap(lapNumber);
+  // Scroll table to the clicked lap
+  scrollToLap(lapNumber);
 }
 
 async function selectLapAndOpenDetails(selectedRow) {
-    if (!selectedRow) {
-        return;
-    }
+  if (!selectedRow) {
+    return;
+  }
 
-    state.selectedLapId = selectedRow.id;
-    await refreshView();
+  state.selectedLapId = selectedRow.id;
+  await refreshView();
 
-    if (!hasAnnotationsForLap(selectedRow, state.currentAnnotations)) {
-        return;
-    }
+  if (!hasAnnotationsForLap(selectedRow, state.currentAnnotations)) {
+    return;
+  }
 
-    const activeRace = state.races.find((race) => race.id === state.activeRaceId);
-    annotationPanel?.openLapDetails({
-        selectedLapRow: selectedRow,
-        rows: state.currentRows,
-        raceStartTime: activeRace?.race_start_time ?? null,
-        annotations: state.currentAnnotations,
-    });
+  const activeRace = state.races.find((race) => race.id === state.activeRaceId);
+  annotationPanel?.openLapDetails({
+    selectedLapRow: selectedRow,
+    rows: state.currentRows,
+    raceStartTime: activeRace?.race_start_time ?? null,
+    annotations: state.currentAnnotations,
+  });
 }
 
 function hasAnnotationsForLap(lapRow, annotations) {
-    if (!lapRow || !annotations) {
-        return false;
-    }
+  if (!lapRow || !annotations) {
+    return false;
+  }
 
-    const lapNumber = lapRow.lap_number;
+  const lapNumber = lapRow.lap_number;
 
-    return annotations.lapNotes.some((item) => item.lap_number === lapNumber)
-        || annotations.taggedIncidents.some((item) => item.lap_number === lapNumber)
-        || annotations.rangeEvents.some((item) => item.start_lap <= lapNumber && lapNumber <= item.end_lap)
-        || annotations.driverStints.some((item) => item.start_lap <= lapNumber && lapNumber <= item.end_lap);
+  return (
+    annotations.lapNotes.some((item) => item.lap_number === lapNumber) ||
+    annotations.taggedIncidents.some((item) => item.lap_number === lapNumber) ||
+    annotations.rangeEvents.some(
+      (item) => item.start_lap <= lapNumber && lapNumber <= item.end_lap,
+    ) ||
+    annotations.driverStints.some(
+      (item) => item.start_lap <= lapNumber && lapNumber <= item.end_lap,
+    )
+  );
 }
 
 function setStatus(message) {
-    refs.importStatus.textContent = message;
-    if (refs.appInitStatus && document.body.classList.contains('app-loading')) {
-        refs.appInitStatus.textContent = message;
-    }
+  refs.importStatus.textContent = message;
+  if (refs.appInitStatus && document.body.classList.contains('app-loading')) {
+    refs.appInitStatus.textContent = message;
+  }
 }
 
 function setAppLoadingState(isLoading) {
-    document.body.classList.toggle('app-loading', isLoading);
-    document.body.classList.toggle('app-ready', !isLoading);
+  document.body.classList.toggle('app-loading', isLoading);
+  document.body.classList.toggle('app-ready', !isLoading);
 }
 
 function datetimeLocalToIso(value) {
-    const trimmed = `${value ?? ''}`.trim();
-    if (!trimmed) {
-        return null;
-    }
+  const trimmed = `${value ?? ''}`.trim();
+  if (!trimmed) {
+    return null;
+  }
 
-    const parsed = new Date(trimmed);
-    if (Number.isNaN(parsed.getTime())) {
-        return null;
-    }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
 
-    return parsed.toISOString();
+  return parsed.toISOString();
 }
 
 function promptForRaceImportOptions(fileName) {
-    while (true) {
-        const response = window.prompt(
-            `Race start time for ${fileName}\nEnter local time as YYYY-MM-DDTHH:mm.\nLeave blank to skip.`,
-            '',
-        );
+  while (true) {
+    const response = window.prompt(
+      `Race start time for ${fileName}\nEnter local time as YYYY-MM-DDTHH:mm.\nLeave blank to skip.`,
+      '',
+    );
 
-        if (response == null) {
-            return { cancelled: true, raceStartTime: null };
-        }
-
-        const trimmed = response.trim();
-        if (!trimmed) {
-            return { cancelled: false, raceStartTime: null };
-        }
-
-        const raceStartTime = datetimeLocalToIso(trimmed);
-        if (raceStartTime) {
-            return { cancelled: false, raceStartTime };
-        }
-
-        window.alert('Invalid race start time. Use YYYY-MM-DDTHH:mm, for example 2026-05-25T09:30.');
+    if (response == null) {
+      return { cancelled: true, raceStartTime: null };
     }
+
+    const trimmed = response.trim();
+    if (!trimmed) {
+      return { cancelled: false, raceStartTime: null };
+    }
+
+    const raceStartTime = datetimeLocalToIso(trimmed);
+    if (raceStartTime) {
+      return { cancelled: false, raceStartTime };
+    }
+
+    window.alert(
+      'Invalid race start time. Use YYYY-MM-DDTHH:mm, for example 2026-05-25T09:30.',
+    );
+  }
 }

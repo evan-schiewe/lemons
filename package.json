@@ -6,13 +6,19 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "lint": "biome lint .",
+    "lint:write": "biome lint --write .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "check": "biome check ."
   },
   "dependencies": {
     "echarts": "6.1.0",
     "sql.js": "1.14.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.4.15",
     "rollup-plugin-visualizer": "7.0.1",
     "vite": "8.0.14"
   }

@@ -3,7 +3,7 @@ import { formatLapTimeHHMMSS, formatWallClock } from '../../utils/time.js';
 
 /**
  * Annotation Helper View Controller
- * 
+ *
  * Renders and manages the guided annotation helper workflow:
  * - Candidate queue with one-at-a-time navigation
  * - Quick actions (incident, event, stint, reviewed/no-action)
@@ -11,157 +11,157 @@ import { formatLapTimeHHMMSS, formatWallClock } from '../../utils/time.js';
  * - Auto-advance toggle and state persistence
  */
 
-const KIND_CONFIG = {
-    lapNote: { title: 'Lap Note', listKey: 'lapNotes' },
-    taggedIncident: { title: 'Tagged Incident', listKey: 'taggedIncidents' },
-    rangeEvent: { title: 'Range Event', listKey: 'rangeEvents' },
-    driverStint: { title: 'Driver Stint', listKey: 'driverStints' },
-};
-
 export function mountAnnotationHelper(container, handlers) {
-    const state = { viewModel: null };
+  const state = { viewModel: null };
 
-    // Delegation for button actions (delete, edit, quick actions)
-    container.addEventListener('click', async (event) => {
-        const button = event.target.closest('button[data-action]');
-        if (!button) {
-            return;
-        }
+  // Delegation for button actions (delete, edit, quick actions)
+  container.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) {
+      return;
+    }
 
-        const action = button.dataset.action;
-        const kind = button.dataset.kind;
+    const action = button.dataset.action;
+    const kind = button.dataset.kind;
 
-        if (action === 'delete') {
-            await handlers.onDelete(kind, button.dataset.id);
-            return;
-        }
+    if (action === 'delete') {
+      await handlers.onDelete(kind, button.dataset.id);
+      return;
+    }
 
-        if (action === 'edit') {
-            handlers.onOpenEditor?.(kind, button.dataset.id);
-            return;
-        }
+    if (action === 'edit') {
+      handlers.onOpenEditor?.(kind, button.dataset.id);
+      return;
+    }
 
-        // Quick actions for helper workflow
-        if (action === 'prev-candidate') {
-            handlers.onNavigate('prev');
-            return;
-        }
+    // Quick actions for helper workflow
+    if (action === 'prev-candidate') {
+      handlers.onNavigate('prev');
+      return;
+    }
 
-        if (action === 'next-candidate') {
-            handlers.onNavigate('next');
-            return;
-        }
+    if (action === 'next-candidate') {
+      handlers.onNavigate('next');
+      return;
+    }
 
-        if (action === 'jump-unresolved') {
-            handlers.onNavigate('jump-unresolved');
-            return;
-        }
+    if (action === 'jump-unresolved') {
+      handlers.onNavigate('jump-unresolved');
+      return;
+    }
 
-        if (action === 'toggle-auto-advance') {
-            handlers.onToggleAutoAdvance();
-            return;
-        }
+    if (action === 'toggle-auto-advance') {
+      handlers.onToggleAutoAdvance();
+      return;
+    }
 
-        if (action === 'quick-incident') {
-            handlers.onOpenComposer?.('taggedIncident');
-            return;
-        }
+    if (action === 'quick-incident') {
+      handlers.onOpenComposer?.('taggedIncident');
+      return;
+    }
 
-        if (action === 'quick-range-event') {
-            handlers.onOpenComposer?.('rangeEvent');
-            return;
-        }
+    if (action === 'quick-range-event') {
+      handlers.onOpenComposer?.('rangeEvent');
+      return;
+    }
 
-        if (action === 'quick-stint-start') {
-            const selected = state.viewModel?.selectedLapRow;
-            if (selected) {
-                handlers.onOpenComposer?.('driverStint', {
-                    prefill: {
-                        driver_name: selected.driver_name,
-                        start_lap: selected.lap_number,
-                        end_lap: selected.lap_number,
-                    },
-                });
-            }
-            return;
-        }
+    if (action === 'quick-stint-start') {
+      const selected = state.viewModel?.selectedLapRow;
+      if (selected) {
+        handlers.onOpenComposer?.('driverStint', {
+          prefill: {
+            driver_name: selected.driver_name,
+            start_lap: selected.lap_number,
+            end_lap: selected.lap_number,
+          },
+        });
+      }
+      return;
+    }
 
-        if (action === 'quick-stint-end') {
-            const selected = state.viewModel?.selectedLapRow;
-            if (selected) {
-                handlers.onOpenComposer?.('driverStint', {
-                    prefill: {
-                        driver_name: selected.driver_name,
-                        start_lap: selected.lap_number,
-                        end_lap: selected.lap_number,
-                    },
-                });
-            }
-            return;
-        }
+    if (action === 'quick-stint-end') {
+      const selected = state.viewModel?.selectedLapRow;
+      if (selected) {
+        handlers.onOpenComposer?.('driverStint', {
+          prefill: {
+            driver_name: selected.driver_name,
+            start_lap: selected.lap_number,
+            end_lap: selected.lap_number,
+          },
+        });
+      }
+      return;
+    }
 
-        if (action === 'mark-reviewed') {
-            // Quick action: create a REVIEWED_NO_ACTION lap note
-            const selected = state.viewModel?.selectedLapRow;
-            if (selected) {
-                await handlers.onSave('lapNote', {
-                    lap_number: selected.lap_number,
-                    driver_name: selected.driver_name,
-                    note_text: 'REVIEWED_NO_ACTION',
-                    color: '#10b981',
-                });
-            }
-            return;
-        }
-    });
+    if (action === 'mark-reviewed') {
+      // Quick action: create a REVIEWED_NO_ACTION lap note
+      const selected = state.viewModel?.selectedLapRow;
+      if (selected) {
+        await handlers.onSave('lapNote', {
+          lap_number: selected.lap_number,
+          driver_name: selected.driver_name,
+          note_text: 'REVIEWED_NO_ACTION',
+          color: '#10b981',
+        });
+      }
+      return;
+    }
+  });
 
-    return {
-        render(viewModel) {
-            state.viewModel = viewModel;
-            if (!viewModel) {
-                container.innerHTML = '<div class="helper-empty">No race loaded</div>';
-                return;
-            }
+  return {
+    render(viewModel) {
+      state.viewModel = viewModel;
+      if (!viewModel) {
+        container.innerHTML = '<div class="helper-empty">No race loaded</div>';
+        return;
+      }
 
-            container.innerHTML = renderHelper(viewModel);
-        },
-    };
+      container.innerHTML = renderHelper(viewModel);
+    },
+  };
 }
 
 function renderHelper(viewModel) {
-    const { candidates, currentIndex, selectedLapRow, annotations, autoAdvance, raceStartTime } = viewModel;
+  const { candidates, currentIndex, annotations, autoAdvance, raceStartTime } =
+    viewModel;
 
-    if (!candidates || candidates.length === 0) {
-        return '<div class="helper-empty"><p>No candidates found. All laps reviewed!</p></div>';
-    }
+  if (!candidates || candidates.length === 0) {
+    return '<div class="helper-empty"><p>No candidates found. All laps reviewed!</p></div>';
+  }
 
-    const currentCandidate = candidates[currentIndex] || candidates[0];
-    const unreviewed = candidates.filter((c) => !c.isReviewed).length;
+  const currentCandidate = candidates[currentIndex] || candidates[0];
+  const unreviewed = candidates.filter((c) => !c.isReviewed).length;
 
-    return `
+  return `
     <div class="helper-wrapper">
       ${renderQueueHeader(currentCandidate, currentIndex, candidates.length, unreviewed, raceStartTime)}
       ${renderNavigationControls(currentIndex, candidates.length, autoAdvance, unreviewed)}
-      ${renderQuickActions(currentCandidate, selectedLapRow)}
+      ${renderQuickActions()}
       ${renderRelatedAnnotations(currentCandidate, annotations)}
     </div>
   `;
 }
 
 function renderQueueHeader(candidate, index, total, unreviewed, raceStartTime) {
-    const statusClass = candidate.isReviewed ? 'helper-status-reviewed' : 'helper-status-unreviewed';
-    const typeColor = {
-        repair: '#7c3aed',
-        pit: '#f59e0b',
-        outlier: '#3b82f6',
+  const statusClass = candidate.isReviewed
+    ? 'helper-status-reviewed'
+    : 'helper-status-unreviewed';
+  const typeColor =
+    {
+      repair: '#7c3aed',
+      pit: '#f59e0b',
+      outlier: '#3b82f6',
     }[candidate.candidate_type] || '#999';
 
-    const contextLabel = `Lap ${escapeHtml(candidate.lap_number)}`;
-    const driverLabel = escapeHtml(candidate.driver_name || 'Unknown driver');
-    const lapTimeMs = formatLapTimeHHMMSS(candidate.lap_time_ms);
-    const wallClockTime = formatWallClock(raceStartTime, candidate.lap_start_offset_ms);
+  const contextLabel = `Lap ${escapeHtml(candidate.lap_number)}`;
+  const driverLabel = escapeHtml(candidate.driver_name || 'Unknown driver');
+  const lapTimeMs = formatLapTimeHHMMSS(candidate.lap_time_ms);
+  const wallClockTime = formatWallClock(
+    raceStartTime,
+    candidate.lap_start_offset_ms,
+  );
 
-    return `
+  return `
     <div class="helper-header">
       <div class="helper-header-main">
         <div class="helper-queue-badge">
@@ -192,12 +192,17 @@ function renderQueueHeader(candidate, index, total, unreviewed, raceStartTime) {
   `;
 }
 
-function renderNavigationControls(currentIndex, total, autoAdvance, unreviewed) {
-    const canGoBack = currentIndex > 0;
-    const canGoNext = currentIndex < total - 1;
-    const hasUnreviewed = unreviewed > 0;
+function renderNavigationControls(
+  currentIndex,
+  total,
+  autoAdvance,
+  unreviewed,
+) {
+  const canGoBack = currentIndex > 0;
+  const canGoNext = currentIndex < total - 1;
+  const hasUnreviewed = unreviewed > 0;
 
-    return `
+  return `
     <div class="helper-controls">
       <div class="helper-nav-buttons">
         <button
@@ -239,10 +244,8 @@ function renderNavigationControls(currentIndex, total, autoAdvance, unreviewed) 
   `;
 }
 
-function renderQuickActions(candidate, selectedLapRow) {
-    const selected = selectedLapRow || candidate;
-
-    return `
+function renderQuickActions() {
+  return `
     <div class="helper-quick-actions">
       <button class="button secondary" data-action="quick-incident" type="button">
         + Incident
@@ -264,18 +267,24 @@ function renderQuickActions(candidate, selectedLapRow) {
 }
 
 function renderRelatedAnnotations(candidate, annotations) {
-    const relatedNotes = annotations.lapNotes.filter((n) => n.lap_number === candidate.lap_number);
-    const relatedIncidents = annotations.taggedIncidents.filter((i) => i.lap_number === candidate.lap_number);
-    const relatedRanges = annotations.rangeEvents.filter(
-        (e) => e.start_lap <= candidate.lap_number && candidate.lap_number <= e.end_lap,
-    );
+  const relatedNotes = annotations.lapNotes.filter(
+    (n) => n.lap_number === candidate.lap_number,
+  );
+  const relatedIncidents = annotations.taggedIncidents.filter(
+    (i) => i.lap_number === candidate.lap_number,
+  );
+  const relatedRanges = annotations.rangeEvents.filter(
+    (e) =>
+      e.start_lap <= candidate.lap_number && candidate.lap_number <= e.end_lap,
+  );
 
-    const total = relatedNotes.length + relatedIncidents.length + relatedRanges.length;
-    if (total === 0) {
-        return '';
-    }
+  const total =
+    relatedNotes.length + relatedIncidents.length + relatedRanges.length;
+  if (total === 0) {
+    return '';
+  }
 
-    return `
+  return `
     <div class="helper-related-annotations">
       <h4>Related Annotations (${total})</h4>
       ${relatedNotes.length ? renderListSection('Notes', 'lapNote', relatedNotes, renderLapNoteItem) : ''}
@@ -286,7 +295,7 @@ function renderRelatedAnnotations(candidate, annotations) {
 }
 
 function renderListSection(title, kind, items, renderItem) {
-    return `
+  return `
     <section class="helper-annotation-list-section">
       <h5>${escapeHtml(title)}</h5>
       <div class="helper-annotation-list">
@@ -297,7 +306,7 @@ function renderListSection(title, kind, items, renderItem) {
 }
 
 function renderLapNoteItem(item, kind) {
-    return `
+  return `
     <article class="helper-annotation-item">
       <strong>Lap ${escapeHtml(item.lap_number)}</strong>
       <p>${escapeHtml(item.note_text)}</p>
@@ -308,7 +317,7 @@ function renderLapNoteItem(item, kind) {
 }
 
 function renderTaggedIncidentItem(item, kind) {
-    return `
+  return `
     <article class="helper-annotation-item">
       <strong>Lap ${escapeHtml(item.lap_number)} · ${escapeHtml(item.tag)}</strong>
       <p>${escapeHtml(item.title)}</p>
@@ -319,7 +328,7 @@ function renderTaggedIncidentItem(item, kind) {
 }
 
 function renderRangeEventItem(item, kind) {
-    return `
+  return `
     <article class="helper-annotation-item">
       <strong>Laps ${escapeHtml(item.start_lap)}–${escapeHtml(item.end_lap)}</strong>
       <p>${escapeHtml(item.title)}</p>
@@ -330,19 +339,10 @@ function renderRangeEventItem(item, kind) {
 }
 
 function renderItemActions(kind, id) {
-    return `
+  return `
     <div class="form-actions">
       <button class="button ghost" data-action="edit" data-kind="${kind}" data-id="${id}" type="button">Edit</button>
       <button class="button ghost" data-action="delete" data-kind="${kind}" data-id="${id}" type="button">Delete</button>
     </div>
   `;
-}
-
-function findItem(viewModel, kind, id) {
-    if (!viewModel) {
-        return null;
-    }
-
-    const listKey = KIND_CONFIG[kind].listKey;
-    return viewModel.annotations[listKey].find((item) => item.id === id) ?? null;
 }

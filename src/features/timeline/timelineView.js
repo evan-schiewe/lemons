@@ -1,136 +1,155 @@
 import { escapeHtml } from '../../utils/format.js';
 
 export function mountTimelineView(container, handlers) {
-    const state = {
-        viewModel: null,
-        editingJournalId: null,
-        isComposerExpanded: false,
-        isLocalEditingEnabled: Boolean(handlers?.isLocalEditingEnabled),
+  const state = {
+    viewModel: null,
+    editingJournalId: null,
+    isComposerExpanded: false,
+    isLocalEditingEnabled: Boolean(handlers?.isLocalEditingEnabled),
+  };
+
+  container.addEventListener('submit', async (event) => {
+    const form = event.target.closest('form[data-action="journal-form"]');
+    if (!form) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const formData = new FormData(form);
+    const lapNumberValue = `${formData.get('lap_number') ?? ''}`.trim();
+    const manualDateTime = `${formData.get('event_time_local') ?? ''}`.trim();
+
+    const payload = {
+      id: state.editingJournalId || undefined,
+      lap_number: lapNumberValue ? Number.parseInt(lapNumberValue, 10) : null,
+      event_time_iso: datetimeLocalToIso(manualDateTime),
+      event_time_source: manualDateTime ? 'manual' : 'lap',
+      title: `${formData.get('title') ?? ''}`.trim(),
+      entry_text: `${formData.get('entry_text') ?? ''}`.trim(),
+      color: `${formData.get('color') ?? ''}`.trim() || '#7c3aed',
     };
 
-    container.addEventListener('submit', async (event) => {
-        const form = event.target.closest('form[data-action="journal-form"]');
-        if (!form) {
-            return;
-        }
+    const didSave = await handlers.onSave?.('journalEntry', payload);
+    if (didSave) {
+      state.editingJournalId = null;
+      state.isComposerExpanded = false;
+      renderCurrent(container, state);
+    }
+  });
 
-        event.preventDefault();
+  container.addEventListener('click', async (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) {
+      return;
+    }
 
-        const formData = new FormData(form);
-        const lapNumberValue = `${formData.get('lap_number') ?? ''}`.trim();
-        const manualDateTime = `${formData.get('event_time_local') ?? ''}`.trim();
+    const action = button.dataset.action;
 
-        const payload = {
-            id: state.editingJournalId || undefined,
-            lap_number: lapNumberValue ? Number.parseInt(lapNumberValue, 10) : null,
-            event_time_iso: datetimeLocalToIso(manualDateTime),
-            event_time_source: manualDateTime ? 'manual' : 'lap',
-            title: `${formData.get('title') ?? ''}`.trim(),
-            entry_text: `${formData.get('entry_text') ?? ''}`.trim(),
-            color: `${formData.get('color') ?? ''}`.trim() || '#7c3aed',
-        };
+    if (
+      !state.isLocalEditingEnabled &&
+      [
+        'open-composer',
+        'edit-journal',
+        'delete-journal',
+        'close-composer',
+        'cancel-edit-journal',
+      ].includes(action)
+    ) {
+      return;
+    }
 
-        const didSave = await handlers.onSave?.('journalEntry', payload);
-        if (didSave) {
-            state.editingJournalId = null;
-            state.isComposerExpanded = false;
-            renderCurrent(container, state);
-        }
-    });
+    if (action === 'edit-journal') {
+      state.editingJournalId = button.dataset.id || null;
+      state.isComposerExpanded = true;
+      renderCurrent(container, state);
+      return;
+    }
 
-    container.addEventListener('click', async (event) => {
-        const button = event.target.closest('button[data-action]');
-        if (!button) {
-            return;
-        }
+    if (action === 'cancel-edit-journal') {
+      state.editingJournalId = null;
+      state.isComposerExpanded = false;
+      renderCurrent(container, state);
+      return;
+    }
 
-        const action = button.dataset.action;
+    if (action === 'open-composer') {
+      state.isComposerExpanded = true;
+      renderCurrent(container, state);
+      return;
+    }
 
-        if (!state.isLocalEditingEnabled && ['open-composer', 'edit-journal', 'delete-journal', 'close-composer', 'cancel-edit-journal'].includes(action)) {
-            return;
-        }
+    if (action === 'close-composer') {
+      state.isComposerExpanded = false;
+      state.editingJournalId = null;
+      renderCurrent(container, state);
+      return;
+    }
 
-        if (action === 'edit-journal') {
-            state.editingJournalId = button.dataset.id || null;
-            state.isComposerExpanded = true;
-            renderCurrent(container, state);
-            return;
-        }
+    if (action === 'delete-journal') {
+      await handlers.onDelete?.('journalEntry', button.dataset.id);
+      return;
+    }
 
-        if (action === 'cancel-edit-journal') {
-            state.editingJournalId = null;
-            state.isComposerExpanded = false;
-            renderCurrent(container, state);
-            return;
-        }
+    if (action === 'jump-lap') {
+      const lapNumber = Number.parseInt(button.dataset.lapNumber || '', 10);
+      if (Number.isInteger(lapNumber) && lapNumber > 0) {
+        await handlers.onSelectLap?.(lapNumber);
+      }
+    }
+  });
 
-        if (action === 'open-composer') {
-            state.isComposerExpanded = true;
-            renderCurrent(container, state);
-            return;
-        }
+  return {
+    render(viewModel) {
+      state.viewModel = viewModel;
 
-        if (action === 'close-composer') {
-            state.isComposerExpanded = false;
-            state.editingJournalId = null;
-            renderCurrent(container, state);
-            return;
-        }
+      const journalEntries = viewModel?.journalEntries || [];
+      if (
+        state.editingJournalId &&
+        !journalEntries.some((item) => item.id === state.editingJournalId)
+      ) {
+        state.editingJournalId = null;
+      }
 
-        if (action === 'delete-journal') {
-            await handlers.onDelete?.('journalEntry', button.dataset.id);
-            return;
-        }
-
-        if (action === 'jump-lap') {
-            const lapNumber = Number.parseInt(button.dataset.lapNumber || '', 10);
-            if (Number.isInteger(lapNumber) && lapNumber > 0) {
-                await handlers.onSelectLap?.(lapNumber);
-            }
-        }
-    });
-
-    return {
-        render(viewModel) {
-            state.viewModel = viewModel;
-
-            const journalEntries = viewModel?.journalEntries || [];
-            if (state.editingJournalId && !journalEntries.some((item) => item.id === state.editingJournalId)) {
-                state.editingJournalId = null;
-            }
-
-            renderCurrent(container, state);
-        },
-    };
+      renderCurrent(container, state);
+    },
+  };
 }
 
 function renderCurrent(container, state) {
-    const viewModel = state.viewModel;
-    if (!viewModel) {
-        container.innerHTML = '<div class="timeline-empty">Load a race to view the event timeline.</div>';
-        return;
-    }
+  const viewModel = state.viewModel;
+  if (!viewModel) {
+    container.innerHTML =
+      '<div class="timeline-empty">Load a race to view the event timeline.</div>';
+    return;
+  }
 
-    const editingJournal = state.editingJournalId
-        ? (viewModel.journalEntries || []).find((item) => item.id === state.editingJournalId) || null
-        : null;
+  const editingJournal = state.editingJournalId
+    ? (viewModel.journalEntries || []).find(
+        (item) => item.id === state.editingJournalId,
+      ) || null
+    : null;
 
-    container.innerHTML = `
+  container.innerHTML = `
         <div class="timeline-layout">
             <section class="timeline-entries">
                 ${renderTimelineEvents(viewModel.timelineEvents || [], state.isLocalEditingEnabled)}
             </section>
-            ${state.isLocalEditingEnabled ? `
+            ${
+              state.isLocalEditingEnabled
+                ? `
             <aside class="timeline-composer-rail">
                 ${state.isComposerExpanded ? renderComposerExpanded(viewModel, editingJournal) : renderComposerCollapsed()}
             </aside>
-            ` : ''}
+            `
+                : ''
+            }
         </div>
     `;
 }
 
 function renderComposerCollapsed() {
-    return `
+  return `
         <button
             type="button"
             class="timeline-composer-toggle"
@@ -144,7 +163,7 @@ function renderComposerCollapsed() {
 }
 
 function renderComposerExpanded(viewModel, editingJournal) {
-    return `
+  return `
         <section class="timeline-composer panel" aria-live="polite">
             <div class="panel-header timeline-composer-header">
                 <h3>${editingJournal ? 'Edit Journal Entry' : 'New Journal Entry'}</h3>
@@ -157,18 +176,19 @@ function renderComposerExpanded(viewModel, editingJournal) {
 }
 
 function renderJournalForm(viewModel, editingJournal) {
-    const selectedLap = viewModel.selectedLapRow || null;
-    // Do not auto-assign a lap for new journal entries.
-    const defaultLapNumber = editingJournal?.lap_number ?? '';
+  const selectedLap = viewModel.selectedLapRow || null;
+  // Do not auto-assign a lap for new journal entries.
+  const defaultLapNumber = editingJournal?.lap_number ?? '';
 
-    const lapDerivedIso = selectedLap && Number.isFinite(selectedLap.lap_start_offset_ms)
-        ? computeLapIso(viewModel.raceStartTime, selectedLap.lap_start_offset_ms)
-        : null;
+  const lapDerivedIso =
+    selectedLap && Number.isFinite(selectedLap.lap_start_offset_ms)
+      ? computeLapIso(viewModel.raceStartTime, selectedLap.lap_start_offset_ms)
+      : null;
 
-    const eventTimeIso = editingJournal?.event_time_iso || lapDerivedIso || null;
-    const eventTimeLocal = isoToDatetimeLocal(eventTimeIso);
+  const eventTimeIso = editingJournal?.event_time_iso || lapDerivedIso || null;
+  const eventTimeLocal = isoToDatetimeLocal(eventTimeIso);
 
-    return `
+  return `
         <form data-action="journal-form" class="timeline-journal-form">
             <label>
                 <span>Title</span>
@@ -199,11 +219,11 @@ function renderJournalForm(viewModel, editingJournal) {
 }
 
 function renderTimelineEvents(events, isLocalEditingEnabled) {
-    if (!events.length) {
-        return '<div class="timeline-empty">No timeline events match the current filters.</div>';
-    }
+  if (!events.length) {
+    return '<div class="timeline-empty">No timeline events match the current filters.</div>';
+  }
 
-    return `
+  return `
         <div class="timeline-list">
             ${events.map((eventItem) => renderEventCard(eventItem, isLocalEditingEnabled)).join('')}
         </div>
@@ -211,21 +231,22 @@ function renderTimelineEvents(events, isLocalEditingEnabled) {
 }
 
 function renderEventCard(eventItem, isLocalEditingEnabled) {
-    const timeLabel = formatIsoTimestamp(eventItem.event_time_iso);
-    const lapLabel = Number.isInteger(eventItem.lap_number)
-        ? `Lap ${eventItem.lap_number}`
-        : (Number.isInteger(eventItem.lap_start) && Number.isInteger(eventItem.lap_end)
-            ? `Laps ${eventItem.lap_start}-${eventItem.lap_end}`
-            : '');
+  const timeLabel = formatIsoTimestamp(eventItem.event_time_iso);
+  const lapLabel = Number.isInteger(eventItem.lap_number)
+    ? `Lap ${eventItem.lap_number}`
+    : Number.isInteger(eventItem.lap_start) &&
+        Number.isInteger(eventItem.lap_end)
+      ? `Laps ${eventItem.lap_start}-${eventItem.lap_end}`
+      : '';
 
-    const isJournal = eventItem.event_type === 'journalEntry';
-    const isDriverSwitch = eventItem.event_type === 'driverSwitch';
+  const isJournal = eventItem.event_type === 'journalEntry';
+  const isDriverSwitch = eventItem.event_type === 'driverSwitch';
 
-    if (isDriverSwitch) {
-        return renderDriverSwitchCard(eventItem, timeLabel, lapLabel);
-    }
+  if (isDriverSwitch) {
+    return renderDriverSwitchCard(eventItem, timeLabel, lapLabel);
+  }
 
-    return `
+  return `
         <article class="timeline-card" style="--event-color: ${escapeHtml(eventItem.color || '#6b7280')}">
             <header class="timeline-card-header">
                 <div class="timeline-card-meta">
@@ -247,13 +268,15 @@ function renderEventCard(eventItem, isLocalEditingEnabled) {
 }
 
 function renderDriverSwitchCard(eventItem, timeLabel, lapLabel) {
-    const oldDriverName = `${eventItem.old_driver_name ?? ''}`.trim();
-    const newDriverName = `${eventItem.new_driver_name ?? eventItem.driver_name ?? ''}`.trim();
-    const driverTransition = oldDriverName && newDriverName
-        ? `${oldDriverName} -> ${newDriverName}`
-        : (newDriverName || oldDriverName || 'Driver updated');
+  const oldDriverName = `${eventItem.old_driver_name ?? ''}`.trim();
+  const newDriverName =
+    `${eventItem.new_driver_name ?? eventItem.driver_name ?? ''}`.trim();
+  const driverTransition =
+    oldDriverName && newDriverName
+      ? `${oldDriverName} -> ${newDriverName}`
+      : newDriverName || oldDriverName || 'Driver updated';
 
-    return `
+  return `
         <article class="timeline-card timeline-card-driver-switch" style="--event-color: ${escapeHtml(eventItem.color || '#059669')}">
             <header class="timeline-card-header">
                 <div class="timeline-card-meta">
@@ -271,61 +294,61 @@ function renderDriverSwitchCard(eventItem, timeLabel, lapLabel) {
 }
 
 function computeLapIso(raceStartTime, lapStartOffsetMs) {
-    if (!raceStartTime || !Number.isFinite(lapStartOffsetMs)) {
-        return null;
-    }
+  if (!raceStartTime || !Number.isFinite(lapStartOffsetMs)) {
+    return null;
+  }
 
-    const startDate = new Date(raceStartTime);
-    if (Number.isNaN(startDate.getTime())) {
-        return null;
-    }
+  const startDate = new Date(raceStartTime);
+  if (Number.isNaN(startDate.getTime())) {
+    return null;
+  }
 
-    return new Date(startDate.getTime() + lapStartOffsetMs).toISOString();
+  return new Date(startDate.getTime() + lapStartOffsetMs).toISOString();
 }
 
 function formatIsoTimestamp(value) {
-    const date = value ? new Date(value) : null;
-    if (!date || Number.isNaN(date.getTime())) {
-        return '-';
-    }
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    return '-';
+  }
 
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    const seconds = String(date.getSeconds()).padStart(2, '0');
-    return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
 function datetimeLocalToIso(value) {
-    const trimmed = `${value ?? ''}`.trim();
-    if (!trimmed) {
-        return null;
-    }
+  const trimmed = `${value ?? ''}`.trim();
+  if (!trimmed) {
+    return null;
+  }
 
-    const parsed = new Date(trimmed);
-    if (Number.isNaN(parsed.getTime())) {
-        return null;
-    }
+  const parsed = new Date(trimmed);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
 
-    return parsed.toISOString();
+  return parsed.toISOString();
 }
 
 function isoToDatetimeLocal(value) {
-    if (!value) {
-        return '';
-    }
+  if (!value) {
+    return '';
+  }
 
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-        return '';
-    }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
 
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
