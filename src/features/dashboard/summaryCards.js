@@ -11,6 +11,7 @@ export function renderSummaryCards(container, summary, lapRows = []) {
     }
 
     const greenFlagPaceMs = getGreenFlagPaceMs(lapRows);
+    const positionChanges = getGreenLapPositionChanges(lapRows);
     const histogramCard = buildLapHistogramCard(lapRows);
 
     const cards = [
@@ -26,6 +27,11 @@ export function renderSummaryCards(container, summary, lapRows = []) {
             value: Number.isFinite(summary.best_position) && Number.isFinite(summary.worst_position)
                 ? `${formatNumber(summary.best_position)}-${formatNumber(summary.worst_position)}`
                 : '-',
+        },
+        {
+            label: 'Positions Gained/Lost',
+            value: formatPositionChanges(positionChanges),
+            note: 'Green flag laps only',
         },
         { label: 'Driver Stints', value: formatNumber(summary.stint_count) },
         histogramCard,
@@ -44,6 +50,67 @@ export function renderSummaryCards(container, summary, lapRows = []) {
         .join('');
 
     initializeSummaryCardCharts(container, histogramCard.chartData ?? null);
+}
+
+function getGreenLapPositionChanges(lapRows) {
+    if (!Array.isArray(lapRows) || !lapRows.length) {
+        return null;
+    }
+
+    const validRows = lapRows
+        .filter((row) => {
+            const lapNumber = Number(row.lap_number);
+            const position = Number(row.position_value);
+            return Number.isFinite(lapNumber)
+                && Number.isFinite(position)
+                && position > 0
+                && Number(row.is_green_flag) === 1;
+        })
+        .sort((a, b) => Number(a.lap_number) - Number(b.lap_number));
+
+    if (validRows.length < 2) {
+        return null;
+    }
+
+    let gained = 0;
+    let lost = 0;
+    let hasContiguousPair = false;
+
+    for (let index = 1; index < validRows.length; index += 1) {
+        const previousRow = validRows[index - 1];
+        const currentRow = validRows[index];
+        const previousLap = Number(previousRow.lap_number);
+        const currentLap = Number(currentRow.lap_number);
+
+        if (currentLap !== previousLap + 1) {
+            continue;
+        }
+
+        const previousPosition = Number(previousRow.position_value);
+        const currentPosition = Number(currentRow.position_value);
+
+        const delta = previousPosition - currentPosition;
+        if (delta > 0) {
+            gained += delta;
+        } else if (delta < 0) {
+            lost += Math.abs(delta);
+        }
+        hasContiguousPair = true;
+    }
+
+    if (!hasContiguousPair) {
+        return null;
+    }
+
+    return { gained, lost };
+}
+
+function formatPositionChanges(changes) {
+    if (!changes) {
+        return '-';
+    }
+
+    return `${formatNumber(changes.gained)}/${formatNumber(changes.lost)}`;
 }
 
 function buildLapHistogramCard(lapRows) {

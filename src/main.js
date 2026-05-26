@@ -75,10 +75,15 @@ const state = {
     helperCurrentIndex: 0,
     helperAutoAdvance: false,
     helperViewMode: 'queue', // 'queue' or 'form'
+    lapRangeBounds: null,
+    lapRangeRaceId: '',
 };
 
 const charts = {
-    lapTime: createLapTimeChart(document.querySelector('#lap-time-chart'), { onSelectLap: handleLapSelectionByNumber }),
+    lapTime: createLapTimeChart(document.querySelector('#lap-time-chart'), {
+        onSelectLap: handleLapSelectionByNumber,
+        onLapRangeChange: handleLapRangeZoom,
+    }),
 };
 
 // Placeholder for annotation helper - will be initialized when module is created
@@ -226,8 +231,8 @@ function wireEvents() {
     });
     refs.driverFilter.addEventListener('change', refreshView);
     refs.searchFilter.addEventListener('input', refreshView);
-    refs.lapMin.addEventListener('input', refreshView);
-    refs.lapMax.addEventListener('input', refreshView);
+    refs.lapMin.addEventListener('input', () => handleLapRangeInput('lapMin'));
+    refs.lapMax.addEventListener('input', () => handleLapRangeInput('lapMax'));
     refs.raceStartTime.addEventListener('change', async (event) => {
         if (!state.activeRaceId) {
             return;
@@ -462,10 +467,14 @@ async function refreshDriverOptions() {
     refs.driverFilter.value = drivers.includes(selectedDriver) ? selectedDriver : '';
 }
 
-async function refreshView() {
+async function refreshView(options = {}) {
+    const { skipChartRender = false } = options;
     updateSortIndicators(refs.table, state.sort);
 
     if (!state.activeRaceId) {
+        state.lapRangeBounds = null;
+        state.lapRangeRaceId = '';
+        syncLapRangeInputs(null, { prefill: false });
         renderSummaryCards(refs.summaryCards, null, []);
         renderLapTable(refs.tableBody, [], state.selectedLapId, null);
         state.currentAnnotations = {
@@ -499,9 +508,25 @@ async function refreshView() {
         return;
     }
 
-    const filters = getFilters();
+    const baseFilters = getBaseFilters();
+    const chartFilters = {
+        ...baseFilters,
+        lapMin: null,
+        lapMax: null,
+    };
+    const lapSeries = getLapSeries(state.db, state.activeRaceId, chartFilters);
+    const lapRangeBounds = getLapBounds(lapSeries);
+    state.lapRangeBounds = lapRangeBounds;
+    const forceToBounds = state.lapRangeRaceId !== state.activeRaceId;
+    const { lapMin, lapMax } = syncLapRangeInputs(lapRangeBounds, { prefill: true, forceToBounds });
+    state.lapRangeRaceId = state.activeRaceId;
+    const filters = {
+        ...baseFilters,
+        lapMin,
+        lapMax,
+    };
+
     const rows = getLapTableRows(state.db, state.activeRaceId, filters, state.sort);
-    const lapSeries = getLapSeries(state.db, state.activeRaceId, filters);
     const summary = getSummary(state.db, state.activeRaceId, filters);
     const annotations = getRaceAnnotations(state.db, state.activeRaceId);
     const timelineEvents = getRaceTimelineEvents(state.db, state.activeRaceId, filters);
@@ -517,7 +542,10 @@ async function refreshView() {
     const activeRace = state.races.find((race) => race.id === state.activeRaceId);
     renderLapTable(refs.tableBody, rows, state.selectedLapId, activeRace?.race_start_time ?? null);
 
-    charts.lapTime.render(lapSeries, annotations);
+    if (!skipChartRender) {
+        charts.lapTime.render(lapSeries, annotations);
+        charts.lapTime.setLapRange(filters.lapMin, filters.lapMax);
+    }
     // BUG FIX: charts.position was initialized but render() was never defined. Skip for now.
     // charts.position.render(lapSeries, annotations, null);
 
@@ -572,16 +600,119 @@ async function refreshView() {
     }
 }
 
-function getFilters() {
-    const lapMin = Number.parseInt(refs.lapMin.value, 10);
-    const lapMax = Number.parseInt(refs.lapMax.value, 10);
+async function handleLapRangeZoom({ lapMin, lapMax }) {
+    const currentMin = parseIntegerOrNull(refs.lapMin.value);
+    const currentMax = parseIntegerOrNull(refs.lapMax.value);
+    const nextMin = Number.isFinite(lapMin) ? Math.round(lapMin) : null;
+    const nextMax = Number.isFinite(lapMax) ? Math.round(lapMax) : null;
 
+    const isSameMin = (Number.isFinite(currentMin) ? currentMin : null) === nextMin;
+    const isSameMax = (Number.isFinite(currentMax) ? currentMax : null) === nextMax;
+    if (isSameMin && isSameMax) {
+        return;
+    }
+
+    refs.lapMin.value = nextMin == null ? '' : `${nextMin}`;
+    refs.lapMax.value = nextMax == null ? '' : `${nextMax}`;
+    syncLapRangeInputs(state.lapRangeBounds, { prefill: true });
+    await refreshView({ skipChartRender: true });
+}
+
+async function handleLapRangeInput(changedField) {
+    syncLapRangeInputs(state.lapRangeBounds, { prefill: true, changedField });
+    await refreshView();
+}
+
+function getBaseFilters() {
     return {
         driver: refs.driverFilter.value,
         search: refs.searchFilter.value.trim(),
-        lapMin: Number.isFinite(lapMin) ? lapMin : null,
-        lapMax: Number.isFinite(lapMax) ? lapMax : null,
     };
+}
+
+function getLapBounds(rows) {
+    if (!Array.isArray(rows) || !rows.length) {
+        return null;
+    }
+
+    const lapNumbers = rows
+        .map((row) => Number(row.lap_number))
+        .filter((lapNumber) => Number.isFinite(lapNumber));
+
+    if (!lapNumbers.length) {
+        return null;
+    }
+
+    return {
+        min: Math.min(...lapNumbers),
+        max: Math.max(...lapNumbers),
+    };
+}
+
+function syncLapRangeInputs(bounds, options = {}) {
+    const { prefill = false, changedField = null, forceToBounds = false } = options;
+
+    if (!bounds || !Number.isFinite(bounds.min) || !Number.isFinite(bounds.max)) {
+        refs.lapMin.removeAttribute('min');
+        refs.lapMin.removeAttribute('max');
+        refs.lapMax.removeAttribute('min');
+        refs.lapMax.removeAttribute('max');
+        return { lapMin: null, lapMax: null };
+    }
+
+    refs.lapMin.min = `${bounds.min}`;
+    refs.lapMin.max = `${bounds.max}`;
+    refs.lapMax.min = `${bounds.min}`;
+    refs.lapMax.max = `${bounds.max}`;
+
+    let lapMin = parseIntegerOrNull(refs.lapMin.value);
+    let lapMax = parseIntegerOrNull(refs.lapMax.value);
+
+    if (forceToBounds) {
+        lapMin = bounds.min;
+        lapMax = bounds.max;
+    }
+
+    if (prefill && lapMin == null) {
+        lapMin = bounds.min;
+    }
+
+    if (prefill && lapMax == null) {
+        lapMax = bounds.max;
+    }
+
+    if (lapMin != null) {
+        lapMin = clamp(lapMin, bounds.min, bounds.max);
+    }
+
+    if (lapMax != null) {
+        lapMax = clamp(lapMax, bounds.min, bounds.max);
+    }
+
+    if (lapMin != null && lapMax != null && lapMin > lapMax) {
+        if (changedField === 'lapMin') {
+            lapMax = lapMin;
+        } else if (changedField === 'lapMax') {
+            lapMin = lapMax;
+        } else {
+            lapMin = bounds.min;
+            lapMax = bounds.max;
+        }
+    }
+
+    refs.lapMin.value = lapMin == null ? '' : `${lapMin}`;
+    refs.lapMax.value = lapMax == null ? '' : `${lapMax}`;
+
+    return { lapMin, lapMax };
+}
+
+function parseIntegerOrNull(value) {
+    const parsed = Number.parseInt(value, 10);
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
 }
 
 function handleLapSelection(lapId) {

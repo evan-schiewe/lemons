@@ -6,14 +6,36 @@ import { formatNumber } from '../../utils/format.js';
 const PALETTE = ['#d94f2b', '#2563eb', '#059669', '#9d174d', '#7c3aed', '#0f766e'];
 const GAP_PALETTE = ['#7c3aed', '#0f766e', '#d97706', '#be123c', '#1d4ed8', '#059669'];
 
-export function createLapTimeChart(element, { onSelectLap }) {
+export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
     const chart = echarts.init(element);
+    let lapAxisBounds = { min: 0, max: 1 };
+    let suppressZoomEvent = false;
+    let zoomSyncTimer = null;
 
     chart.on('click', (params) => {
         const lapNumber = params?.data?.lapNumber;
         if (Number.isFinite(lapNumber)) {
             onSelectLap(lapNumber);
         }
+    });
+
+    chart.on('datazoom', () => {
+        if (suppressZoomEvent || typeof onLapRangeChange !== 'function') {
+            return;
+        }
+
+        if (zoomSyncTimer) {
+            clearTimeout(zoomSyncTimer);
+        }
+
+        zoomSyncTimer = setTimeout(() => {
+            const range = getCurrentZoomLapRange(chart, lapAxisBounds);
+            if (!range) {
+                return;
+            }
+
+            onLapRangeChange(range);
+        }, 80);
     });
 
     return {
@@ -41,6 +63,7 @@ export function createLapTimeChart(element, { onSelectLap }) {
                 .filter((lapNumber) => Number.isFinite(lapNumber));
             const lapAxisMin = lapNumbers.length ? Math.min(...lapNumbers) : 0;
             const lapAxisMax = lapNumbers.length ? Math.max(...lapNumbers) : 1;
+            lapAxisBounds = { min: lapAxisMin, max: lapAxisMax };
             const lapSeries = [{
                 name: 'Lap Times',
                 type: 'line',
@@ -242,6 +265,7 @@ export function createLapTimeChart(element, { onSelectLap }) {
                         gridIndex: 0,
                         min: lapAxisMin,
                         max: lapAxisMax,
+                        minInterval: 1,
                     },
                     {
                         type: 'value',
@@ -249,6 +273,7 @@ export function createLapTimeChart(element, { onSelectLap }) {
                         gridIndex: 1,
                         min: lapAxisMin,
                         max: lapAxisMax,
+                        minInterval: 1,
                     },
                     {
                         type: 'value',
@@ -258,6 +283,7 @@ export function createLapTimeChart(element, { onSelectLap }) {
                         gridIndex: 2,
                         min: lapAxisMin,
                         max: lapAxisMax,
+                        minInterval: 1,
                     },
                 ],
                 yAxis: [
@@ -303,7 +329,13 @@ export function createLapTimeChart(element, { onSelectLap }) {
                 ],
                 dataZoom: [
                     { type: 'inside', xAxisIndex: [0, 1, 2], zoomOnMouseWheel: false, moveOnMouseWheel: false },
-                    { type: 'slider', bottom: 28, height: 32, xAxisIndex: [0, 1, 2] },
+                    {
+                        type: 'slider',
+                        bottom: 28,
+                        height: 32,
+                        xAxisIndex: [0, 1, 2],
+                        labelFormatter: (value) => `${Math.round(value)}`,
+                    },
                 ],
                 series: [
                     ...lapSeries,
@@ -319,7 +351,121 @@ export function createLapTimeChart(element, { onSelectLap }) {
         resize() {
             chart.resize();
         },
+        setLapRange(lapMin, lapMax) {
+            const normalized = normalizeZoomLapRange(lapMin, lapMax, lapAxisBounds);
+            if (!normalized) {
+                return;
+            }
+            applyZoomRange(chart, normalized, () => {
+                suppressZoomEvent = true;
+            }, () => {
+                suppressZoomEvent = false;
+            });
+        },
     };
+}
+
+function applyZoomRange(chart, range, onBefore, onAfter) {
+    onBefore?.();
+    try {
+        chart.dispatchAction({
+            type: 'dataZoom',
+            dataZoomIndex: 0,
+            startValue: range.lapMin,
+            endValue: range.lapMax,
+        });
+        chart.dispatchAction({
+            type: 'dataZoom',
+            dataZoomIndex: 1,
+            startValue: range.lapMin,
+            endValue: range.lapMax,
+        });
+    } finally {
+        onAfter?.();
+    }
+}
+
+function getCurrentRawZoomLapRange(chart, lapAxisBounds) {
+    const option = chart.getOption();
+    const dataZooms = Array.isArray(option?.dataZoom) ? option.dataZoom : [];
+    if (!dataZooms.length) {
+        return null;
+    }
+
+    const zoom = dataZooms.find((item) => Number.isFinite(Number(item.startValue)) || Number.isFinite(Number(item.endValue)))
+        ?? dataZooms[0];
+
+    const axisMin = Number(lapAxisBounds?.min);
+    const axisMax = Number(lapAxisBounds?.max);
+    const span = axisMax - axisMin;
+
+    let startValue = Number(zoom.startValue);
+    let endValue = Number(zoom.endValue);
+
+    if (!Number.isFinite(startValue) || !Number.isFinite(endValue)) {
+        if (!Number.isFinite(axisMin) || !Number.isFinite(axisMax) || span <= 0) {
+            return null;
+        }
+
+        const startPct = Number.isFinite(Number(zoom.start)) ? Number(zoom.start) : 0;
+        const endPct = Number.isFinite(Number(zoom.end)) ? Number(zoom.end) : 100;
+        startValue = axisMin + (span * startPct / 100);
+        endValue = axisMin + (span * endPct / 100);
+    }
+
+    return {
+        lapMin: Math.min(startValue, endValue),
+        lapMax: Math.max(startValue, endValue),
+    };
+}
+
+function getCurrentZoomLapRange(chart, lapAxisBounds) {
+    const rawRange = getCurrentRawZoomLapRange(chart, lapAxisBounds);
+    if (!rawRange) {
+        return null;
+    }
+
+    const axisMin = Number(lapAxisBounds?.min);
+    const axisMax = Number(lapAxisBounds?.max);
+
+    const clampedMin = clamp(Math.floor(rawRange.lapMin), axisMin, axisMax);
+    const clampedMax = clamp(Math.ceil(rawRange.lapMax), axisMin, axisMax);
+    if (!Number.isFinite(clampedMin) || !Number.isFinite(clampedMax)) {
+        return null;
+    }
+
+    return { lapMin: clampedMin, lapMax: clampedMax };
+}
+
+function normalizeZoomLapRange(lapMin, lapMax, lapAxisBounds) {
+    const axisMin = Number(lapAxisBounds?.min);
+    const axisMax = Number(lapAxisBounds?.max);
+
+    if (!Number.isFinite(axisMin) || !Number.isFinite(axisMax)) {
+        return null;
+    }
+
+    let normalizedMin = Number.isFinite(Number(lapMin)) ? Number(lapMin) : axisMin;
+    let normalizedMax = Number.isFinite(Number(lapMax)) ? Number(lapMax) : axisMax;
+
+    if (normalizedMin > normalizedMax) {
+        const temp = normalizedMin;
+        normalizedMin = normalizedMax;
+        normalizedMax = temp;
+    }
+
+    return {
+        lapMin: clamp(Math.floor(normalizedMin), axisMin, axisMax),
+        lapMax: clamp(Math.ceil(normalizedMax), axisMin, axisMax),
+    };
+}
+
+function clamp(value, min, max) {
+    if (!Number.isFinite(value)) {
+        return Number.NaN;
+    }
+
+    return Math.max(min, Math.min(max, value));
 }
 
 function withGaps(points) {
