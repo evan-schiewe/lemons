@@ -36,6 +36,11 @@ export function createLapTimeChart(element, { onSelectLap }) {
                 return Number.isFinite(slowest) ? Math.max(slowest, lapSeconds) : lapSeconds;
             }, Number.NaN);
             const lapTimeAxisMax = getTenMinuteCeilingSeconds(slowestSeconds);
+            const lapNumbers = rows
+                .map((row) => row.lap_number)
+                .filter((lapNumber) => Number.isFinite(lapNumber));
+            const lapAxisMin = lapNumbers.length ? Math.min(...lapNumbers) : 0;
+            const lapAxisMax = lapNumbers.length ? Math.max(...lapNumbers) : 1;
             const lapSeries = [{
                 name: 'Lap Times',
                 type: 'line',
@@ -228,18 +233,22 @@ export function createLapTimeChart(element, { onSelectLap }) {
                 grid: [
                     { left: 56, right: 72, top: 40, height: '33%', containLabel: false },
                     { left: 56, right: 72, top: '47%', height: '14%', containLabel: false },
-                    { left: 56, right: 72, top: '66%', height: '16%', containLabel: false },
+                    { left: 56, right: 72, top: '69%', height: '13%', containLabel: false },
                 ],
                 xAxis: [
                     {
                         type: 'value',
                         name: '',
                         gridIndex: 0,
+                        min: lapAxisMin,
+                        max: lapAxisMax,
                     },
                     {
                         type: 'value',
                         name: '',
                         gridIndex: 1,
+                        min: lapAxisMin,
+                        max: lapAxisMax,
                     },
                     {
                         type: 'value',
@@ -247,6 +256,8 @@ export function createLapTimeChart(element, { onSelectLap }) {
                         nameLocation: 'middle',
                         nameGap: 18,
                         gridIndex: 2,
+                        min: lapAxisMin,
+                        max: lapAxisMax,
                     },
                 ],
                 yAxis: [
@@ -324,7 +335,20 @@ function withGaps(points) {
 
 function buildRangeAreas(rangeEvents) {
     return {
+        silent: true,
         itemStyle: { opacity: 0.08 },
+        label: {
+            show: true,
+            position: 'insideBottom',
+            formatter: (params) => params?.data?.[0]?.name ?? params?.name ?? '',
+            color: '#1f2937',
+            backgroundColor: 'transparent',
+            borderColor: 'transparent',
+            borderWidth: 0,
+            borderRadius: 0,
+            padding: 0,
+            textBorderWidth: 0,
+        },
         data: rangeEvents.map((event) => [
             { name: event.title, xAxis: event.start_lap, itemStyle: { color: event.color } },
             { xAxis: event.end_lap },

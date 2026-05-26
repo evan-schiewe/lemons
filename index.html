@@ -30,24 +30,19 @@
         <!-- Sticky tab panel with chart and annotations -->
         <div class="sticky-chart-panel">
           <div class="tab-switcher">
-            <button class="tab-button active" data-tab="chart">Chart</button>
-            <button class="tab-button" data-tab="annotations">Annotations</button>
+            <button class="tab-button active" data-tab="chart">Charts</button>
             <button class="tab-button" data-tab="timeline">Timeline</button>
+            <button class="tab-button" data-tab="annotations">Annotations</button>
             <button id="data-tab-button" class="tab-button" data-tab="data" hidden>Data</button>
           </div>
           <div class="tab-content-wrapper">
             <div id="chart-tab" class="tab-content active">
               <section class="panel chart-panel sticky-content">
-                <div class="panel-header">
-                  <h2>Lap Time</h2>
-                  <span class="panel-subtitle">Green flag pace excludes outlier laps</span>
-                </div>
                 <div id="lap-time-chart" class="chart-surface"></div>
               </section>
               <section class="panel controls-panel">
                 <div class="panel-header">
                   <h2>Filters</h2>
-                  <span id="storage-mode" class="status-pill">Storage: loading</span>
                 </div>
                 <div class="filters-grid">
                   <label>

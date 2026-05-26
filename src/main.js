@@ -39,7 +39,6 @@ const refs = {
     lapMax: document.querySelector('#lap-max'),
     raceStartTime: document.querySelector('#race-start-time'),
     importStatus: document.querySelector('#import-status'),
-    storageMode: document.querySelector('#storage-mode'),
     summaryCards: document.querySelector('#summary-cards'),
     tableBody: document.querySelector('#lap-table-body'),
     table: document.querySelector('table'),
@@ -142,7 +141,6 @@ async function initialize() {
     setStatus('Initializing browser SQLite cache...');
     state.db = await new SQLiteClient().init();
     state.annotationStore = createAnnotationStore(state.db);
-    refs.storageMode.textContent = `Storage: ${state.db.storageMode}`;
 
     // Restore helper state from localStorage
     state.helperAutoAdvance = localStorage.getItem('helperAutoAdvance') === '1';
@@ -400,7 +398,6 @@ async function handleImport(event) {
     }
 
     refs.csvInput.value = '';
-    refs.storageMode.textContent = `Storage: ${state.db.storageMode}`;
     await refreshRaceOptions();
     await refreshView();
     setStatus(`Import complete. ${messages.join(' | ')}`);
@@ -422,7 +419,6 @@ async function handleRestoreSqlite(event) {
         state.helperCurrentIndex = 0;
 
         refs.sqliteInput.value = '';
-        refs.storageMode.textContent = `Storage: ${state.db.storageMode}`;
         await refreshRaceOptions();
         await refreshView();
 
@@ -470,7 +466,7 @@ async function refreshView() {
     updateSortIndicators(refs.table, state.sort);
 
     if (!state.activeRaceId) {
-        renderSummaryCards(refs.summaryCards, null);
+        renderSummaryCards(refs.summaryCards, null, []);
         renderLapTable(refs.tableBody, [], state.selectedLapId, null);
         state.currentAnnotations = {
             lapNotes: [],
@@ -517,7 +513,7 @@ async function refreshView() {
         state.selectedLapId = '';
     }
 
-    renderSummaryCards(refs.summaryCards, summary);
+    renderSummaryCards(refs.summaryCards, summary, rows);
     const activeRace = state.races.find((race) => race.id === state.activeRaceId);
     renderLapTable(refs.tableBody, rows, state.selectedLapId, activeRace?.race_start_time ?? null);
 
