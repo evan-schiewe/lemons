@@ -1,0 +1,18 @@
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "check-yaml" },
+    { id = "end-of-file-fixer" },
+    { id = "check-merge-conflict" },
+    { id = "trailing-whitespace" },
+]
+
+[[repos]]
+repo = "local"
+
+[[repos.hooks]]
+id = "check"
+name = "check"
+entry = "pnpm check:write"
+language = "system"
+pass_filenames = false

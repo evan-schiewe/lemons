@@ -1,12 +1,13 @@
-import { escapeHtml, formatNumber, formatSpeed } from '../../utils/format.js';
-import { formatDurationMs, formatWallClock } from '../../utils/time.js';
+import type { LapRow, SortState } from '../../types';
+import { escapeHtml, formatNumber, formatSpeed } from '../../utils/format';
+import { formatDurationMs, formatWallClock } from '../../utils/time';
 
 export function renderLapTable(
-  tbody,
-  rows,
-  selectedLapId,
-  raceStartTimeIso = null,
-) {
+  tbody: HTMLTableSectionElement,
+  rows: LapRow[],
+  selectedLapId: string,
+  raceStartTimeIso: string | null = null,
+): void {
   if (!rows.length) {
     tbody.innerHTML =
       '<tr><td colspan="9">No laps match the current filters.</td></tr>';
@@ -43,23 +44,30 @@ export function renderLapTable(
     .join('');
 }
 
-export function updateSortIndicators(table, sort) {
-  table.querySelectorAll('thead th[data-sort]').forEach((header) => {
-    const column = header.dataset.sort;
-    header.textContent = header.textContent.replace(/\s[↑↓]$/, '');
-    if (column === sort.column) {
-      header.textContent = `${header.textContent} ${sort.direction === 'desc' ? '↓' : '↑'}`;
-    }
-  });
+export function updateSortIndicators(
+  table: HTMLTableElement,
+  sort: SortState,
+): void {
+  table
+    .querySelectorAll<HTMLTableCellElement>('thead th[data-sort]')
+    .forEach((header) => {
+      const column = header.dataset.sort;
+      header.textContent = (header.textContent ?? '').replace(/\s[↑↓]$/, '');
+      if (column === sort.column) {
+        header.textContent = `${header.textContent} ${sort.direction === 'desc' ? '↓' : '↑'}`;
+      }
+    });
 }
 
-export function scrollToLap(lapNumber) {
+export function scrollToLap(lapNumber: number): void {
   const tbody = document.querySelector('#lap-table-body');
   if (!tbody) return;
 
   const row = Array.from(tbody.querySelectorAll('tr')).find((tr) => {
     const lapCell = tr.querySelector('td:first-child');
-    return lapCell && parseInt(lapCell.textContent, 10) === lapNumber;
+    return (
+      lapCell && Number.parseInt(lapCell.textContent ?? '', 10) === lapNumber
+    );
   });
 
   if (row) {

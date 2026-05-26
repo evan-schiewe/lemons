@@ -9,8 +9,18 @@ import {
 } from 'echarts/components';
 import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
-import { formatNumber } from '../../utils/format.js';
-import { formatDurationMs, formatGapDisplay } from '../../utils/time.js';
+import type {
+  DriverStint,
+  LapNote,
+  LapRangeBounds,
+  LapRow,
+  LapTimeChartHandle,
+  RaceAnnotations,
+  RangeEvent,
+  TaggedIncident,
+} from '../../types';
+import { formatNumber } from '../../utils/format';
+import { formatDurationMs, formatGapDisplay } from '../../utils/time';
 
 echarts.use([
   LineChart,
@@ -42,15 +52,72 @@ const GAP_PALETTE = [
   '#059669',
 ];
 
-export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
+interface LapTimeChartHandlers {
+  onSelectLap: (lapNumber: number) => void | Promise<void>;
+  onLapRangeChange?: (range: {
+    lapMin: number;
+    lapMax: number;
+  }) => void | Promise<void>;
+}
+
+interface LapAxisBounds {
+  min: number;
+  max: number;
+}
+
+interface ChartClickParams {
+  data?: {
+    lapNumber?: unknown;
+  };
+}
+
+interface CustomRenderParams {
+  coordSys: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  data?: {
+    itemStyle?: {
+      color?: string;
+    };
+  };
+}
+
+interface CustomRenderApi {
+  value: (index: number) => number;
+  coord: (value: number[]) => [number, number];
+  size: (value: number[]) => [number, number];
+  visual: (key: string) => unknown;
+}
+
+interface ChartTooltipParam {
+  seriesName: string;
+  value?: [number, number | null];
+  data?: {
+    gapDisplay?: string;
+    label?: string;
+  };
+}
+
+interface MarkAreaLabelParam {
+  data?: Array<{ name?: string }>;
+  name?: string;
+}
+
+export function createLapTimeChart(
+  element: HTMLElement,
+  { onSelectLap, onLapRangeChange }: LapTimeChartHandlers,
+): LapTimeChartHandle {
   const chart = echarts.init(element);
   let lapAxisBounds = { min: 0, max: 1 };
   let suppressZoomEvent = false;
-  let zoomSyncTimer = null;
+  let zoomSyncTimer: ReturnType<typeof setTimeout> | null = null;
 
-  chart.on('click', (params) => {
-    const lapNumber = params?.data?.lapNumber;
-    if (Number.isFinite(lapNumber)) {
+  chart.on('click', (params: unknown) => {
+    const lapNumber = (params as ChartClickParams)?.data?.lapNumber;
+    if (typeof lapNumber === 'number' && Number.isFinite(lapNumber)) {
       onSelectLap(lapNumber);
     }
   });
@@ -75,9 +142,16 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
   });
 
   return {
-    render(rows, annotations) {
+    render(
+      rows: LapRow[],
+      annotations: RaceAnnotations,
+      options: { lapAxisBounds?: LapRangeBounds | null } = {},
+    ) {
       const fastestSeconds = rows.reduce((fastest, row) => {
-        if (!Number.isFinite(row.lap_time_ms)) {
+        if (
+          typeof row.lap_time_ms !== 'number' ||
+          !Number.isFinite(row.lap_time_ms)
+        ) {
           return fastest;
         }
 
@@ -88,7 +162,10 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
       }, Number.NaN);
       const lapTimeAxisMin = getMinuteFloorSeconds(fastestSeconds);
       const slowestSeconds = rows.reduce((slowest, row) => {
-        if (!Number.isFinite(row.lap_time_ms)) {
+        if (
+          typeof row.lap_time_ms !== 'number' ||
+          !Number.isFinite(row.lap_time_ms)
+        ) {
           return slowest;
         }
 
@@ -101,8 +178,19 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
       const lapNumbers = rows
         .map((row) => row.lap_number)
         .filter((lapNumber) => Number.isFinite(lapNumber));
-      const lapAxisMin = lapNumbers.length ? Math.min(...lapNumbers) : 0;
-      const lapAxisMax = lapNumbers.length ? Math.max(...lapNumbers) : 1;
+      const providedLapBounds = options.lapAxisBounds;
+      const lapAxisMin =
+        providedLapBounds && Number.isFinite(providedLapBounds.min)
+          ? providedLapBounds.min
+          : lapNumbers.length
+            ? Math.min(...lapNumbers)
+            : 0;
+      const lapAxisMax =
+        providedLapBounds && Number.isFinite(providedLapBounds.max)
+          ? providedLapBounds.max
+          : lapNumbers.length
+            ? Math.max(...lapNumbers)
+            : 1;
       lapAxisBounds = { min: lapAxisMin, max: lapAxisMax };
       const lapSeries = [
         {
@@ -118,7 +206,7 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
             rows
               .filter((row) => Number.isFinite(row.lap_time_ms))
               .map((row) => ({
-                value: [row.lap_number, row.lap_time_ms / 1000],
+                value: [row.lap_number, Number(row.lap_time_ms) / 1000],
                 lapNumber: row.lap_number,
                 outlier: row.is_outlier === 1,
                 driverName: row.driver_name,
@@ -134,7 +222,7 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
         xAxisIndex: 1,
         yAxisIndex: 1,
         data: stintLaneModel.stints,
-        renderItem: (params, api) => {
+        renderItem: (params: CustomRenderParams, api: CustomRenderApi) => {
           const startLap = api.value(0);
           const endLap = api.value(1);
           const laneIndex = api.value(2);
@@ -159,18 +247,23 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
             return null;
           }
 
+          const visualColor = api.visual('color');
           return {
             type: 'rect',
             shape: clippedRect,
             style: {
-              fill: api.visual('color') || params.data?.itemStyle?.color,
+              fill:
+                typeof visualColor === 'string'
+                  ? visualColor
+                  : params.data?.itemStyle?.color,
               opacity: 0.88,
             },
           };
         },
         encode: { x: [0, 1], y: 2 },
         tooltip: {
-          formatter: (params) => params.data?.label || 'Driver stint',
+          formatter: (params: ChartTooltipParam) =>
+            params.data?.label || 'Driver stint',
         },
         z: 3,
       };
@@ -251,11 +344,13 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
                   row.gap_leader_ms,
                   row.gap_leader_laps,
                 );
-                const gapValue = Number.isFinite(row.gap_leader_ms)
-                  ? row.gap_leader_ms / 1000
-                  : Number.isFinite(row.gap_leader_laps)
-                    ? row.gap_leader_laps
-                    : null;
+                const gapValue =
+                  typeof row.gap_leader_ms === 'number' &&
+                  Number.isFinite(row.gap_leader_ms)
+                    ? row.gap_leader_ms / 1000
+                    : Number.isFinite(row.gap_leader_laps)
+                      ? row.gap_leader_laps
+                      : null;
 
                 return {
                   value: [row.lap_number, gapValue],
@@ -284,17 +379,18 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
         color: PALETTE,
         tooltip: {
           trigger: 'axis',
-          formatter: (items) =>
+          formatter: (items: ChartTooltipParam[]) =>
             items
               .map((item) => {
+                const value = item.value?.[1];
                 if (item.seriesName.startsWith('Lap Times')) {
-                  return `${item.seriesName}: ${formatDurationMs(item.value[1] * 1000)}`;
+                  return `${item.seriesName}: ${formatDurationMs(typeof value === 'number' ? value * 1000 : null)}`;
                 }
                 if (item.seriesName.startsWith('Position')) {
-                  return `${item.seriesName}: ${formatNumber(item.value?.[1])}`;
+                  return `${item.seriesName}: ${formatNumber(value)}`;
                 }
                 if (item.seriesName.startsWith('Gap to Leader')) {
-                  return `${item.seriesName}: ${item.data?.gapDisplay ?? formatNumber(item.value?.[1])}`;
+                  return `${item.seriesName}: ${item.data?.gapDisplay ?? formatNumber(value)}`;
                 }
                 if (item.seriesName.startsWith('Driver Stints')) {
                   return `${item.seriesName}: ${item.data?.label ?? ''}`;
@@ -372,7 +468,7 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
             min: lapTimeAxisMin,
             max: lapTimeAxisMax,
             axisLabel: {
-              formatter: (value) => formatDurationWholeSeconds(value),
+              formatter: (value: number) => formatDurationWholeSeconds(value),
             },
           },
           {
@@ -401,7 +497,7 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
             min: 0,
             gridIndex: 2,
             axisLabel: {
-              formatter: (value) => formatNumber(value),
+              formatter: (value: number) => formatNumber(value),
             },
           },
         ],
@@ -417,7 +513,7 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
             bottom: 28,
             height: 32,
             xAxisIndex: [0, 1, 2],
-            labelFormatter: (value) => `${Math.round(value)}`,
+            labelFormatter: (value: number) => `${Math.round(value)}`,
           },
         ],
         series: [
@@ -434,7 +530,10 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
     resize() {
       chart.resize();
     },
-    setLapRange(lapMin, lapMax) {
+    setLapRange(
+      lapMin: number | null | undefined,
+      lapMax: number | null | undefined,
+    ) {
       const normalized = normalizeZoomLapRange(lapMin, lapMax, lapAxisBounds);
       if (!normalized) {
         return;
@@ -453,7 +552,12 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
   };
 }
 
-function applyZoomRange(chart, range, onBefore, onAfter) {
+function applyZoomRange(
+  chart: ReturnType<typeof echarts.init>,
+  range: { lapMin: number; lapMax: number },
+  onBefore?: () => void,
+  onAfter?: () => void,
+): void {
   onBefore?.();
   try {
     chart.dispatchAction({
@@ -473,7 +577,10 @@ function applyZoomRange(chart, range, onBefore, onAfter) {
   }
 }
 
-function getCurrentRawZoomLapRange(chart, lapAxisBounds) {
+function getCurrentRawZoomLapRange(
+  chart: ReturnType<typeof echarts.init>,
+  lapAxisBounds: LapAxisBounds,
+): { lapMin: number; lapMax: number } | null {
   const option = chart.getOption();
   const dataZooms = Array.isArray(option?.dataZoom) ? option.dataZoom : [];
   if (!dataZooms.length) {
@@ -513,7 +620,10 @@ function getCurrentRawZoomLapRange(chart, lapAxisBounds) {
   };
 }
 
-function getCurrentZoomLapRange(chart, lapAxisBounds) {
+function getCurrentZoomLapRange(
+  chart: ReturnType<typeof echarts.init>,
+  lapAxisBounds: LapAxisBounds,
+): { lapMin: number; lapMax: number } | null {
   const rawRange = getCurrentRawZoomLapRange(chart, lapAxisBounds);
   if (!rawRange) {
     return null;
@@ -531,7 +641,11 @@ function getCurrentZoomLapRange(chart, lapAxisBounds) {
   return { lapMin: clampedMin, lapMax: clampedMax };
 }
 
-function normalizeZoomLapRange(lapMin, lapMax, lapAxisBounds) {
+function normalizeZoomLapRange(
+  lapMin: number | null | undefined,
+  lapMax: number | null | undefined,
+  lapAxisBounds: LapAxisBounds,
+): { lapMin: number; lapMax: number } | null {
   const axisMin = Number(lapAxisBounds?.min);
   const axisMax = Number(lapAxisBounds?.max);
 
@@ -558,7 +672,7 @@ function normalizeZoomLapRange(lapMin, lapMax, lapAxisBounds) {
   };
 }
 
-function clamp(value, min, max) {
+function clamp(value: number, min: number, max: number): number {
   if (!Number.isFinite(value)) {
     return Number.NaN;
   }
@@ -566,8 +680,16 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
-function withGaps(points) {
-  const result = [];
+function withGaps<T extends { lapNumber: number }>(
+  points: T[],
+): Array<
+  | T
+  | {
+      value: [number, null];
+      lapNumber: number;
+    }
+> {
+  const result: Array<T | { value: [number, null]; lapNumber: number }> = [];
   for (let i = 0; i < points.length; i++) {
     if (i > 0 && points[i].lapNumber - points[i - 1].lapNumber > 1) {
       result.push({
@@ -580,14 +702,15 @@ function withGaps(points) {
   return result;
 }
 
-function buildRangeAreas(rangeEvents) {
+function buildRangeAreas(rangeEvents: RangeEvent[]) {
   return {
     silent: true,
     itemStyle: { opacity: 0.08 },
     label: {
       show: true,
       position: 'insideBottom',
-      formatter: (params) => params?.data?.[0]?.name ?? params?.name ?? '',
+      formatter: (params: MarkAreaLabelParam) =>
+        params?.data?.[0]?.name ?? params?.name ?? '',
       color: '#1f2937',
       backgroundColor: 'transparent',
       borderColor: 'transparent',
@@ -608,12 +731,12 @@ function buildRangeAreas(rangeEvents) {
 }
 
 function buildIncidentScatter(
-  name,
-  items,
-  yValue,
-  color,
-  xAxisIndex,
-  yAxisIndex,
+  name: string,
+  items: Array<LapNote | TaggedIncident>,
+  yValue: number,
+  color: string,
+  xAxisIndex: number,
+  yAxisIndex: number,
   symbol = 'circle',
 ) {
   return {
@@ -632,7 +755,7 @@ function buildIncidentScatter(
   };
 }
 
-function buildStintLaneModel(driverStints) {
+function buildStintLaneModel(driverStints: DriverStint[]) {
   const sortedStints = driverStints
     .filter(
       (stint) =>
@@ -645,8 +768,8 @@ function buildStintLaneModel(driverStints) {
       return a.end_lap - b.end_lap;
     });
 
-  const laneByDriver = new Map();
-  const orderedDrivers = [];
+  const laneByDriver = new Map<string, number>();
+  const orderedDrivers: string[] = [];
   sortedStints.forEach((stint) => {
     const driverName =
       (stint.driver_name || 'Unknown driver').trim() || 'Unknown driver';
@@ -662,12 +785,12 @@ function buildStintLaneModel(driverStints) {
     laneByDriver.set(driverName, driverCount - index + 1);
   });
 
-  const labels = ['Incidents', 'Lap Notes'];
+  const labels: string[] = ['Incidents', 'Lap Notes'];
   laneByDriver.forEach((laneIndex, driverName) => {
     labels[laneIndex] = driverName;
   });
 
-  const driverColorByName = new Map();
+  const driverColorByName = new Map<string, string>();
   laneByDriver.forEach((laneIndex, driverName) => {
     driverColorByName.set(driverName, buildDriverLaneColor(laneIndex - 2));
   });
@@ -689,12 +812,12 @@ function buildStintLaneModel(driverStints) {
   return { labels, stints };
 }
 
-function buildDriverLaneColor(driverIndex) {
+function buildDriverLaneColor(driverIndex: number): string {
   const hue = (driverIndex * 137.508) % 360;
   return `hsl(${hue}, 72%, 46%)`;
 }
 
-function getMinuteFloorSeconds(seconds) {
+function getMinuteFloorSeconds(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0) {
     return 60;
   }
@@ -703,7 +826,7 @@ function getMinuteFloorSeconds(seconds) {
   return Math.max(60, minuteFloorSeconds);
 }
 
-function getTenMinuteCeilingSeconds(seconds) {
+function getTenMinuteCeilingSeconds(seconds: number): number {
   if (!Number.isFinite(seconds) || seconds <= 0) {
     return 600;
   }
@@ -712,7 +835,7 @@ function getTenMinuteCeilingSeconds(seconds) {
   return Math.max(600, tenMinuteCeilingSeconds);
 }
 
-function formatDurationWholeSeconds(seconds) {
+function formatDurationWholeSeconds(seconds: number): string {
   if (!Number.isFinite(seconds)) {
     return '-';
   }

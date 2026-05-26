@@ -2,19 +2,48 @@ import { BarChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent } from 'echarts/components';
 import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
-import { escapeHtml, formatNumber } from '../../utils/format.js';
-import { formatDurationMs, formatLapTimeHHMMSS } from '../../utils/time.js';
+import type { CallbackDataParams } from 'echarts/types/dist/shared';
+import type { LapRow, SummaryRow } from '../../types';
+import { escapeHtml, formatNumber } from '../../utils/format';
+import { formatDurationMs, formatLapTimeHHMMSS } from '../../utils/time';
 
 echarts.use([BarChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
 let isHistogramExpanded = false;
 
+interface SummaryCardOptions {
+  greenFlagOnly?: boolean;
+}
+
+interface PositionChanges {
+  gained: number;
+  lost: number;
+}
+
+interface HistogramBin {
+  value: number | null;
+  rawCount?: number;
+  startMs: number;
+  endMs: number;
+}
+
+interface HistogramCard {
+  label: string;
+  value?: string;
+  note?: string;
+  visualHtml?: string;
+  chartData?: {
+    bins: HistogramBin[];
+    useLogScale: boolean;
+  };
+}
+
 export function renderSummaryCards(
-  container,
-  summary,
-  lapRows = [],
-  options = {},
-) {
+  container: HTMLElement,
+  summary: SummaryRow | null,
+  lapRows: LapRow[] = [],
+  options: SummaryCardOptions = {},
+): void {
   const { greenFlagOnly = false } = options;
 
   disposeSummaryCardCharts(container);
@@ -73,7 +102,10 @@ export function renderSummaryCards(
   initializeSummaryCardCharts(container, histogramCard.chartData ?? null);
 }
 
-function getLapPositionChanges(lapRows, options = {}) {
+function getLapPositionChanges(
+  lapRows: LapRow[],
+  options: SummaryCardOptions = {},
+): PositionChanges | null {
   const { greenFlagOnly = false } = options;
 
   if (!Array.isArray(lapRows) || !lapRows.length) {
@@ -117,7 +149,7 @@ function getLapPositionChanges(lapRows, options = {}) {
   return { gained, lost };
 }
 
-function formatPositionChanges(changes) {
+function formatPositionChanges(changes: PositionChanges | null): string {
   if (!changes) {
     return '-';
   }
@@ -125,7 +157,10 @@ function formatPositionChanges(changes) {
   return `${formatNumber(changes.gained)}/${formatNumber(changes.lost)}`;
 }
 
-function buildLapHistogramCard(lapRows, options = {}) {
+function buildLapHistogramCard(
+  lapRows: LapRow[],
+  options: SummaryCardOptions = {},
+): HistogramCard {
   const { greenFlagOnly = false } = options;
   const useLogScale = !greenFlagOnly;
   const lapTimesMs = greenFlagOnly
@@ -171,7 +206,10 @@ function buildLapHistogramCard(lapRows, options = {}) {
   };
 }
 
-function getPaceMs(lapRows, options = {}) {
+function getPaceMs(
+  lapRows: LapRow[],
+  options: SummaryCardOptions = {},
+): number {
   const { greenFlagOnly = false } = options;
   const lapTimesMs = greenFlagOnly
     ? getTrimmedGreenFlagLapTimes(lapRows)
@@ -185,32 +223,32 @@ function getPaceMs(lapRows, options = {}) {
   return total / lapTimesMs.length;
 }
 
-function getGreenFlagLapTimes(lapRows) {
+function getGreenFlagLapTimes(lapRows: LapRow[]): number[] {
   return lapRows
     .filter((row) => Number(row.is_green_flag) === 1)
     .map((row) => Number(row.lap_time_ms))
     .filter((value) => Number.isFinite(value) && value > 0);
 }
 
-function getLapTimes(lapRows) {
+function getLapTimes(lapRows: LapRow[]): number[] {
   return lapRows
     .map((row) => Number(row.lap_time_ms))
     .filter((value) => Number.isFinite(value) && value > 0);
 }
 
-function getTrimmedGreenFlagLapTimes(lapRows) {
+function getTrimmedGreenFlagLapTimes(lapRows: LapRow[]): number[] {
   const greenFlagLapTimes = getGreenFlagLapTimes(lapRows);
 
   return trimLapTimesP95(greenFlagLapTimes);
 }
 
-function getTrimmedLapTimes(lapRows) {
+function getTrimmedLapTimes(lapRows: LapRow[]): number[] {
   const lapTimes = getLapTimes(lapRows);
 
   return trimLapTimesP95(lapTimes);
 }
 
-function trimLapTimesP95(lapTimes) {
+function trimLapTimesP95(lapTimes: number[]): number[] {
   if (!lapTimes.length) {
     return [];
   }
@@ -225,7 +263,11 @@ function trimLapTimesP95(lapTimes) {
   return lapTimes.filter((value) => value <= p95);
 }
 
-function buildHistogramBins(values, binCount, options = {}) {
+function buildHistogramBins(
+  values: number[],
+  binCount: number,
+  options: { useLogBins?: boolean } = {},
+): HistogramBin[] {
   const { useLogBins = false } = options;
   const sortedValues = [...values].sort((a, b) => a - b);
   const minValue = sortedValues[0];
@@ -283,7 +325,7 @@ function buildHistogramBins(values, binCount, options = {}) {
   }));
 }
 
-function percentile(sortedValues, p) {
+function percentile(sortedValues: number[], p: number): number {
   if (!sortedValues.length) {
     return NaN;
   }
@@ -303,19 +345,22 @@ function percentile(sortedValues, p) {
   );
 }
 
-function disposeSummaryCardCharts(container) {
+function disposeSummaryCardCharts(container: HTMLElement): void {
   const chartElements = container.querySelectorAll(
     '.summary-card-histogram-chart',
   );
   chartElements.forEach((element) => {
-    const chart = echarts.getInstanceByDom(element);
+    const chart = echarts.getInstanceByDom(element as HTMLElement);
     if (chart) {
       chart.dispose();
     }
   });
 }
 
-function initializeSummaryCardCharts(container, histogramBins) {
+function initializeSummaryCardCharts(
+  container: HTMLElement,
+  histogramBins: HistogramCard['chartData'] | null,
+): void {
   const bins = Array.isArray(histogramBins)
     ? histogramBins
     : histogramBins?.bins;
@@ -325,7 +370,9 @@ function initializeSummaryCardCharts(container, histogramBins) {
     return;
   }
 
-  const chartElement = container.querySelector('.summary-card-histogram-chart');
+  const chartElement = container.querySelector<HTMLElement>(
+    '.summary-card-histogram-chart',
+  );
   if (!chartElement) {
     return;
   }
@@ -369,7 +416,14 @@ function applyHistogramExpandedState({
   histogramBins,
   useLogScale,
   expanded,
-}) {
+}: {
+  chart: ReturnType<typeof echarts.init>;
+  chartElement: HTMLElement;
+  histogramCard: Element | null;
+  histogramBins: HistogramBin[];
+  useLogScale: boolean;
+  expanded: boolean;
+}): void {
   if (histogramCard) {
     histogramCard.classList.toggle('summary-card-expanded', expanded);
   }
@@ -391,7 +445,7 @@ function applyHistogramExpandedState({
   setTimeout(() => chart.resize(), 220);
 }
 
-function updateHistogramExpandButton(button, expanded) {
+function updateHistogramExpandButton(button: Element, expanded: boolean): void {
   button.setAttribute('aria-pressed', expanded ? 'true' : 'false');
   button.setAttribute('title', expanded ? 'Collapse chart' : 'Expand chart');
   button.setAttribute(
@@ -401,7 +455,10 @@ function updateHistogramExpandButton(button, expanded) {
   button.textContent = expanded ? '🗕' : '⛶';
 }
 
-function buildHistogramChartOption(histogramBins, options = {}) {
+function buildHistogramChartOption(
+  histogramBins: HistogramBin[],
+  options: { compact?: boolean; useLogScale?: boolean } = {},
+) {
   const { compact = true, useLogScale = false } = options;
   const seriesData = histogramBins.map((bin) => {
     const count = Number(bin?.value) || 0;
@@ -435,7 +492,7 @@ function buildHistogramChartOption(histogramBins, options = {}) {
         ? undefined
         : {
             show: true,
-            formatter: (_value, index) => {
+            formatter: (_value: string, index: number) => {
               const bin = histogramBins[index];
               const startMs = Number(bin?.startMs);
               const endMs = Number(bin?.endMs);
@@ -474,7 +531,7 @@ function buildHistogramChartOption(histogramBins, options = {}) {
         : {
             show: true,
             color: '#6b5d4d',
-            formatter: (value) => `${formatNumber(value)} laps`,
+            formatter: (value: number) => `${formatNumber(value)} laps`,
             hideOverlap: false,
           },
       axisLine: compact
@@ -488,7 +545,13 @@ function buildHistogramChartOption(histogramBins, options = {}) {
       axisPointer: { type: 'shadow' },
       ...(compact
         ? {
-            position: (_point, _params, dom, _rect, size) => {
+            position: (
+              _point: unknown,
+              _params: unknown,
+              dom: HTMLElement,
+              _rect: unknown,
+              size: { viewSize?: number[] },
+            ) => {
               const tooltipWidth = dom?.offsetWidth ?? 0;
               const chartWidth = size?.viewSize?.[0] ?? 0;
               const horizontalPadding = 6;
@@ -505,13 +568,13 @@ function buildHistogramChartOption(histogramBins, options = {}) {
             },
           }
         : {}),
-      formatter: (params) => {
+      formatter: (params: CallbackDataParams | CallbackDataParams[]) => {
         const point = Array.isArray(params) ? params[0] : params;
+        const data = point?.data as Partial<HistogramBin> | undefined;
         const count =
-          Number(point?.data?.rawCount ?? point?.data?.value ?? point?.value) ||
-          0;
-        const startMs = point?.data?.startMs;
-        const endMs = point?.data?.endMs;
+          Number(data?.rawCount ?? data?.value ?? point?.value) || 0;
+        const startMs = data?.startMs;
+        const endMs = data?.endMs;
         const rangeLabel =
           Number.isFinite(startMs) && Number.isFinite(endMs)
             ? `${formatDurationMs(startMs)} - ${formatDurationMs(endMs)}`

@@ -1,6 +1,25 @@
-import { formatWallClock } from '../../utils/time.js';
+import type { SQLiteClient } from '../../db/sqliteClient';
+import type {
+  CandidateLap,
+  DriverStint,
+  JournalEntry,
+  LapFilters,
+  LapNote,
+  LapRow,
+  RaceAnnotations,
+  RaceRecord,
+  RaceSnapshot,
+  RangeEvent,
+  SortColumn,
+  SortState,
+  SqlParams,
+  SummaryRow,
+  TaggedIncident,
+  TimelineEvent,
+} from '../../types';
+import { formatWallClock } from '../../utils/time';
 
-const SORTABLE_COLUMNS = {
+const SORTABLE_COLUMNS: Partial<Record<SortColumn, string>> = {
   lap_number: 'lap_number',
   lap_start_offset_ms: 'lap_start_offset_ms',
   driver_name: 'display_driver_name',
@@ -11,8 +30,8 @@ const SORTABLE_COLUMNS = {
   gap_leader_display: 'gap_leader_display',
 };
 
-export function getRaceList(db) {
-  return db.query(
+export function getRaceList(db: SQLiteClient): RaceRecord[] {
+  return db.query<RaceRecord>(
     `
       SELECT id, name, source_file_name, race_start_time, row_count, imported_at, updated_at
       FROM races
@@ -21,9 +40,9 @@ export function getRaceList(db) {
   );
 }
 
-export function getDriverOptions(db, raceId) {
+export function getDriverOptions(db: SQLiteClient, raceId: string): string[] {
   return db
-    .query(
+    .query<{ driver_name: string }>(
       `
       SELECT DISTINCT ${resolvedDriverNameSql('nl')} AS driver_name
             FROM normalized_laps nl
@@ -35,7 +54,12 @@ export function getDriverOptions(db, raceId) {
     .map((row) => row.driver_name);
 }
 
-export function getLapTableRows(db, raceId, filters, sort) {
+export function getLapTableRows(
+  db: SQLiteClient,
+  raceId: string,
+  filters: LapFilters,
+  sort: SortState,
+): LapRow[] {
   const { whereSql, params } = buildLapFilterSql(
     raceId,
     filters,
@@ -45,7 +69,7 @@ export function getLapTableRows(db, raceId, filters, sort) {
   const orderBy = SORTABLE_COLUMNS[sort.column] ?? 'lap_number';
   const direction = sort.direction === 'desc' ? 'DESC' : 'ASC';
 
-  return db.query(
+  return db.query<LapRow>(
     `
             WITH race_laps AS (
                 SELECT
@@ -95,9 +119,13 @@ export function getLapTableRows(db, raceId, filters, sort) {
   );
 }
 
-export function getLapSeries(db, raceId, filters) {
+export function getLapSeries(
+  db: SQLiteClient,
+  raceId: string,
+  filters: LapFilters,
+): LapRow[] {
   const { whereSql, params } = buildLapFilterSql(raceId, filters);
-  return db.query(
+  return db.query<LapRow>(
     `
       SELECT
         id,
@@ -122,9 +150,13 @@ export function getLapSeries(db, raceId, filters) {
   );
 }
 
-export function getSummary(db, raceId, filters) {
+export function getSummary(
+  db: SQLiteClient,
+  raceId: string,
+  filters: LapFilters,
+): SummaryRow {
   const { whereSql, params } = buildLapFilterSql(raceId, filters);
-  const aggregate = db.queryOne(
+  const aggregate = db.queryOne<SummaryRow>(
     `
       SELECT
         COUNT(*) AS total_laps,
@@ -139,7 +171,7 @@ export function getSummary(db, raceId, filters) {
     params,
   );
 
-  const raceCounts = db.queryOne(
+  const raceCounts = db.queryOne<SummaryRow>(
     `
       SELECT
         (SELECT COUNT(*) FROM lap_notes WHERE race_id = ?) AS lap_note_count,
@@ -151,46 +183,70 @@ export function getSummary(db, raceId, filters) {
     [raceId, raceId, raceId, raceId, raceId],
   );
 
-  return { ...aggregate, ...raceCounts };
+  return {
+    total_laps: 0,
+    best_lap_ms: null,
+    avg_green_ms: null,
+    long_lap_outliers: 0,
+    best_position: null,
+    worst_position: null,
+    lap_note_count: 0,
+    incident_count: 0,
+    range_event_count: 0,
+    stint_count: 0,
+    journal_count: 0,
+    ...aggregate,
+    ...raceCounts,
+  };
 }
 
-export function getRaceAnnotations(db, raceId) {
+export function getRaceAnnotations(
+  db: SQLiteClient,
+  raceId: string,
+): RaceAnnotations {
   return {
-    lapNotes: db.query(
+    lapNotes: db.query<LapNote>(
       'SELECT * FROM lap_notes WHERE race_id = ? ORDER BY lap_number ASC, updated_at DESC',
       [raceId],
     ),
-    taggedIncidents: db.query(
+    taggedIncidents: db.query<TaggedIncident>(
       'SELECT * FROM tagged_incidents WHERE race_id = ? ORDER BY lap_number ASC, updated_at DESC',
       [raceId],
     ),
-    rangeEvents: db.query(
+    rangeEvents: db.query<RangeEvent>(
       'SELECT * FROM range_events WHERE race_id = ? ORDER BY start_lap ASC, updated_at DESC',
       [raceId],
     ),
-    driverStints: db.query(
+    driverStints: db.query<DriverStint>(
       'SELECT * FROM driver_stints WHERE race_id = ? ORDER BY start_lap ASC, updated_at DESC',
       [raceId],
     ),
-    journalEntries: db.query(
+    journalEntries: db.query<JournalEntry>(
       'SELECT * FROM journal_entries WHERE race_id = ? ORDER BY COALESCE(event_time_iso, created_at) ASC, updated_at DESC',
       [raceId],
     ),
   };
 }
 
-export function getRaceTimelineEvents(db, raceId, filters = {}) {
+export function getRaceTimelineEvents(
+  db: SQLiteClient,
+  raceId: string,
+  filters: LapFilters = {},
+): TimelineEvent[] {
   if (!raceId) {
     return [];
   }
 
-  const race = db.queryOne('SELECT race_start_time FROM races WHERE id = ?', [
-    raceId,
-  ]);
+  const race = db.queryOne<Pick<RaceRecord, 'race_start_time'>>(
+    'SELECT race_start_time FROM races WHERE id = ?',
+    [raceId],
+  );
   const raceStartTimeIso = race?.race_start_time ?? null;
   const annotations = getRaceAnnotations(db, raceId);
   const laps = getRaceLapsWithOffsets(db, raceId);
-  const lapByNumber = new Map(laps.map((lap) => [lap.lap_number, lap]));
+  const lapByNumber = new Map<number, LapRow>(
+    laps.map((lap) => [lap.lap_number, lap]),
+  );
 
   const lapNoteEvents = annotations.lapNotes.map((item) => {
     const lap = lapByNumber.get(item.lap_number);
@@ -232,57 +288,60 @@ export function getRaceTimelineEvents(db, raceId, filters = {}) {
     });
   });
 
-  const rangeEvents = annotations.rangeEvents.flatMap((item) => {
-    const startLap = lapByNumber.get(item.start_lap);
-    const endLap = lapByNumber.get(item.end_lap);
-    const resolvedTitle = `${item.title ?? ''}`.trim() || 'Range Event';
+  const rangeEvents = annotations.rangeEvents.flatMap(
+    (item): TimelineEvent[] => {
+      const startLap = lapByNumber.get(item.start_lap);
+      const endLap = lapByNumber.get(item.end_lap);
+      const resolvedTitle = `${item.title ?? ''}`.trim() || 'Range Event';
 
-    const rangeStartEvent = buildTimelineEvent({
-      eventType: 'rangeEvent',
-      eventLabel: 'Range Event',
-      sourceId: item.id,
-      lapNumber: item.start_lap,
-      lapStart: item.start_lap,
-      lapEnd: item.end_lap,
-      driverName: null,
-      title: resolvedTitle,
-      body: [item.tag, item.details].filter(Boolean).join(' - '),
-      color: item.color || '#2563eb',
-      createdAt: item.created_at,
-      updatedAt: item.updated_at,
-      raceStartTimeIso,
-      lapStartOffsetMs: startLap?.lap_start_offset_ms,
-    });
+      const rangeStartEvent = buildTimelineEvent({
+        eventType: 'rangeEvent',
+        eventLabel: 'Range Event',
+        sourceId: item.id,
+        lapNumber: item.start_lap,
+        lapStart: item.start_lap,
+        lapEnd: item.end_lap,
+        driverName: null,
+        title: resolvedTitle,
+        body: [item.tag, item.details].filter(Boolean).join(' - '),
+        color: item.color || '#2563eb',
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+        raceStartTimeIso,
+        lapStartOffsetMs: startLap?.lap_start_offset_ms,
+      });
 
-    const rangeEndEvent = buildTimelineEvent({
-      eventType: 'rangeEventEnd',
-      eventLabel: 'Range Event',
-      sourceId: `${item.id}:end`,
-      lapNumber: item.end_lap,
-      lapStart: item.end_lap,
-      lapEnd: item.end_lap,
-      driverName: null,
-      title: `End of ${resolvedTitle}`,
-      body: '',
-      color: item.color || '#2563eb',
-      createdAt: item.created_at,
-      updatedAt: item.updated_at,
-      raceStartTimeIso,
-      lapStartOffsetMs: endLap?.lap_start_offset_ms,
-    });
+      const rangeEndEvent = buildTimelineEvent({
+        eventType: 'rangeEventEnd',
+        eventLabel: 'Range Event',
+        sourceId: `${item.id}:end`,
+        lapNumber: item.end_lap,
+        lapStart: item.end_lap,
+        lapEnd: item.end_lap,
+        driverName: null,
+        title: `End of ${resolvedTitle}`,
+        body: '',
+        color: item.color || '#2563eb',
+        createdAt: item.created_at,
+        updatedAt: item.updated_at,
+        raceStartTimeIso,
+        lapStartOffsetMs: endLap?.lap_start_offset_ms,
+      });
 
-    return [rangeStartEvent, rangeEndEvent];
-  });
+      return [rangeStartEvent, rangeEndEvent];
+    },
+  );
 
   const journalEvents = annotations.journalEntries.map((item) => {
-    const lap = Number.isInteger(item.lap_number)
-      ? lapByNumber.get(item.lap_number)
+    const journalLapNumber = Number.isInteger(item.lap_number)
+      ? item.lap_number
       : null;
+    const lap = journalLapNumber ? lapByNumber.get(journalLapNumber) : null;
     return buildTimelineEvent({
       eventType: 'journalEntry',
       eventLabel: 'Journal',
       sourceId: item.id,
-      lapNumber: Number.isInteger(item.lap_number) ? item.lap_number : null,
+      lapNumber: journalLapNumber,
       driverName: lap?.display_driver_name || lap?.driver_name || null,
       title: item.title || 'Journal Entry',
       body: item.entry_text,
@@ -319,8 +378,11 @@ export function getRaceTimelineEvents(db, raceId, filters = {}) {
  * Sorted by lap_number, id for deterministic traversal.
  * Returns basic lap data plus candidate_type label.
  */
-export function getCandidates(db, raceId) {
-  return db.query(
+export function getCandidates(
+  db: SQLiteClient,
+  raceId: string,
+): CandidateLap[] {
+  return db.query<CandidateLap>(
     `
       SELECT
                 nl.id,
@@ -346,6 +408,11 @@ export function getCandidates(db, raceId) {
   );
 }
 
+interface ReviewStatus {
+  isReviewed: boolean;
+  source: string | null;
+}
+
 /**
  * Infer reviewed status for a candidate based on existing annotations and driver changes.
  * A candidate is considered reviewed if it has:
@@ -356,16 +423,16 @@ export function getCandidates(db, raceId) {
  * - A driver stint covering the lap
  */
 export function inferCandidateReviewedStatus(
-  candidate,
-  annotations,
-  db,
-  raceId,
-) {
+  candidate: CandidateLap,
+  annotations: RaceAnnotations,
+  db: SQLiteClient,
+  raceId: string,
+): ReviewStatus {
   const { lap_number, driver_name } = candidate;
 
   // Check for driver change at this lap (stint boundary)
   if (db && raceId && lap_number > 1) {
-    const previousLap = db.queryOne(
+    const previousLap = db.queryOne<Pick<LapRow, 'driver_name'>>(
       `
             SELECT ${resolvedDriverNameSql('nl')} AS driver_name
             FROM normalized_laps nl
@@ -422,11 +489,11 @@ export function inferCandidateReviewedStatus(
  * Merges candidate data with reviewed status and source.
  */
 export function augmentCandidateWithReviewStatus(
-  candidate,
-  annotations,
-  db,
-  raceId,
-) {
+  candidate: CandidateLap,
+  annotations: RaceAnnotations,
+  db: SQLiteClient,
+  raceId: string,
+): CandidateLap & ReviewStatus {
   const reviewStatus = inferCandidateReviewedStatus(
     candidate,
     annotations,
@@ -439,10 +506,15 @@ export function augmentCandidateWithReviewStatus(
   };
 }
 
-export function getRaceSnapshot(db, raceId) {
-  const race = db.queryOne('SELECT * FROM races WHERE id = ?', [raceId]);
+export function getRaceSnapshot(
+  db: SQLiteClient,
+  raceId: string,
+): RaceSnapshot {
+  const race = db.queryOne<RaceRecord>('SELECT * FROM races WHERE id = ?', [
+    raceId,
+  ]);
   const laps = db
-    .query(
+    .query<LapRow>(
       `
       SELECT
         nl.*,
@@ -481,8 +553,15 @@ export function getRaceSnapshot(db, raceId) {
   };
 }
 
-function buildLapStartIso(raceStartIso, lapStartOffsetMs) {
-  if (!raceStartIso || !Number.isFinite(lapStartOffsetMs)) {
+function buildLapStartIso(
+  raceStartIso: string | null | undefined,
+  lapStartOffsetMs: number | null | undefined,
+): string | null {
+  if (
+    !raceStartIso ||
+    typeof lapStartOffsetMs !== 'number' ||
+    !Number.isFinite(lapStartOffsetMs)
+  ) {
     return null;
   }
 
@@ -494,11 +573,11 @@ function buildLapStartIso(raceStartIso, lapStartOffsetMs) {
   return new Date(raceStart.getTime() + lapStartOffsetMs).toISOString();
 }
 
-function getRaceLapsWithOffsets(db, raceId) {
-  return db.query(
+function getRaceLapsWithOffsets(db: SQLiteClient, raceId: string): LapRow[] {
+  return db.query<LapRow>(
     `
             SELECT
-                nl.*, 
+                nl.*,
                 ${resolvedDriverNameSql('nl')} AS display_driver_name,
                 COALESCE(
                     SUM(COALESCE(nl.lap_time_ms, 0)) OVER (
@@ -516,8 +595,11 @@ function getRaceLapsWithOffsets(db, raceId) {
   );
 }
 
-function buildDriverSwitchTimelineEvents(laps, raceStartTimeIso) {
-  const events = [];
+function buildDriverSwitchTimelineEvents(
+  laps: LapRow[],
+  raceStartTimeIso: string | null,
+): TimelineEvent[] {
+  const events: TimelineEvent[] = [];
 
   for (let index = 1; index < laps.length; index += 1) {
     const previous = laps[index - 1];
@@ -555,6 +637,27 @@ function buildDriverSwitchTimelineEvents(laps, raceStartTimeIso) {
   return events;
 }
 
+interface BuildTimelineEventInput {
+  eventType: string;
+  eventLabel: string;
+  sourceId: string;
+  lapNumber?: number | null;
+  lapStart?: number | null;
+  lapEnd?: number | null;
+  driverName?: string | null;
+  oldDriverName?: string | null;
+  newDriverName?: string | null;
+  title?: string | null;
+  body?: string | null;
+  color?: string;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  explicitEventTimeIso?: string | null;
+  eventTimeSource?: string | null;
+  raceStartTimeIso?: string | null;
+  lapStartOffsetMs?: number | null;
+}
+
 function buildTimelineEvent({
   eventType,
   eventLabel,
@@ -574,7 +677,7 @@ function buildTimelineEvent({
   eventTimeSource = null,
   raceStartTimeIso = null,
   lapStartOffsetMs = null,
-}) {
+}: BuildTimelineEventInput): TimelineEvent {
   const lapDerivedIso = Number.isFinite(lapStartOffsetMs)
     ? buildLapStartIso(raceStartTimeIso, lapStartOffsetMs)
     : null;
@@ -615,7 +718,7 @@ function buildTimelineEvent({
   };
 }
 
-function normalizeIso(value) {
+function normalizeIso(value: string | null | undefined): string | null {
   const trimmed = `${value ?? ''}`.trim();
   if (!trimmed) {
     return null;
@@ -629,13 +732,28 @@ function normalizeIso(value) {
   return date.toISOString();
 }
 
-function timelineEventMatchesFilters(event, filters = {}) {
-  const lapMin = Number.isFinite(filters.lapMin) ? filters.lapMin : null;
-  const lapMax = Number.isFinite(filters.lapMax) ? filters.lapMax : null;
+function timelineEventMatchesFilters(
+  event: TimelineEvent,
+  filters: LapFilters = {},
+): boolean {
+  const lapMin =
+    typeof filters.lapMin === 'number' && Number.isFinite(filters.lapMin)
+      ? filters.lapMin
+      : null;
+  const lapMax =
+    typeof filters.lapMax === 'number' && Number.isFinite(filters.lapMax)
+      ? filters.lapMax
+      : null;
 
   if (lapMin !== null || lapMax !== null) {
-    const startLap = Number.isInteger(event.lap_start) ? event.lap_start : null;
-    const endLap = Number.isInteger(event.lap_end) ? event.lap_end : startLap;
+    const startLap =
+      typeof event.lap_start === 'number' && Number.isInteger(event.lap_start)
+        ? event.lap_start
+        : null;
+    const endLap =
+      typeof event.lap_end === 'number' && Number.isInteger(event.lap_end)
+        ? event.lap_end
+        : startLap;
 
     if (startLap === null || endLap === null) {
       // Keep valid manual/no-lap journal entries visible in timeline.
@@ -683,13 +801,18 @@ function timelineEventMatchesFilters(event, filters = {}) {
   return true;
 }
 
-function compareTimelineEvents(left, right) {
-  const leftLap = Number.isInteger(left.lap_start)
-    ? left.lap_start
-    : Number.POSITIVE_INFINITY;
-  const rightLap = Number.isInteger(right.lap_start)
-    ? right.lap_start
-    : Number.POSITIVE_INFINITY;
+function compareTimelineEvents(
+  left: TimelineEvent,
+  right: TimelineEvent,
+): number {
+  const leftLap =
+    typeof left.lap_start === 'number' && Number.isInteger(left.lap_start)
+      ? left.lap_start
+      : Number.POSITIVE_INFINITY;
+  const rightLap =
+    typeof right.lap_start === 'number' && Number.isInteger(right.lap_start)
+      ? right.lap_start
+      : Number.POSITIVE_INFINITY;
 
   if (leftLap === rightLap && Number.isFinite(leftLap)) {
     const leftPriority = left.event_type === 'journalEntry' ? 0 : 1;
@@ -728,10 +851,15 @@ function compareTimelineEvents(left, right) {
   return `${left.id}`.localeCompare(`${right.id}`);
 }
 
-function buildLapFilterSql(raceId, filters, alias = '', includeRaceId = true) {
+function buildLapFilterSql(
+  raceId: string,
+  filters: LapFilters,
+  alias = '',
+  includeRaceId = true,
+): { whereSql: string; params: SqlParams } {
   const prefix = alias ? `${alias}.` : '';
-  const conditions = [];
-  const params = [];
+  const conditions: string[] = [];
+  const params: SqlParams = [];
 
   if (includeRaceId) {
     conditions.push(`${prefix}race_id = ?`);
@@ -748,12 +876,12 @@ function buildLapFilterSql(raceId, filters, alias = '', includeRaceId = true) {
     params.push(`%${filters.search.toLowerCase()}%`);
   }
 
-  if (Number.isFinite(filters.lapMin)) {
+  if (typeof filters.lapMin === 'number' && Number.isFinite(filters.lapMin)) {
     conditions.push(`${prefix}lap_number >= ?`);
     params.push(filters.lapMin);
   }
 
-  if (Number.isFinite(filters.lapMax)) {
+  if (typeof filters.lapMax === 'number' && Number.isFinite(filters.lapMax)) {
     conditions.push(`${prefix}lap_number <= ?`);
     params.push(filters.lapMax);
   }
@@ -771,7 +899,7 @@ function buildLapFilterSql(raceId, filters, alias = '', includeRaceId = true) {
   };
 }
 
-function resolvedDriverNameSql(alias = '') {
+function resolvedDriverNameSql(alias = ''): string {
   const prefix = alias ? `${alias}.` : '';
   return `COALESCE((SELECT ds.driver_name FROM driver_stints ds WHERE ds.race_id = ${prefix}race_id AND ${prefix}lap_number BETWEEN ds.start_lap AND ds.end_lap ORDER BY ds.updated_at DESC, ds.start_lap DESC LIMIT 1), ${prefix}driver_name)`;
 }

@@ -1,14 +1,37 @@
-import { loadCsvFile } from '../../import/csvLoader.js';
-import { parseRaceCsv } from '../../import/parseRaceCsv.js';
-import { normalizeRaceData } from '../../model/normalizeRaceData.js';
+import type { SQLiteClient } from '../../db/sqliteClient';
+import { loadCsvFile } from '../../import/csvLoader';
+import { parseRaceCsv } from '../../import/parseRaceCsv';
+import { normalizeRaceData } from '../../model/normalizeRaceData';
+import type { RaceRecord, SqlParams } from '../../types';
 
-export async function importRace(db, file, options = {}) {
+interface ImportRaceOptions {
+  raceStartTime?: string | null;
+}
+
+export interface ImportRaceResult {
+  raceId: string;
+  raceName: string;
+  rowCount: number;
+  warnings: string[];
+  stats: {
+    drivers: string[];
+    totalLaps: number;
+    minLap: number;
+    maxLap: number;
+  };
+}
+
+export async function importRace(
+  db: SQLiteClient,
+  file: File,
+  options: ImportRaceOptions = {},
+): Promise<ImportRaceResult> {
   const loadedFile = await loadCsvFile(file);
   const parsedCsv = parseRaceCsv(loadedFile.text);
   const normalized = normalizeRaceData(parsedCsv.rows);
   const timestamp = new Date().toISOString();
   const raceKey = `race-${loadedFile.contentHash}`;
-  const existingRace = db.queryOne(
+  const existingRace = db.queryOne<Pick<RaceRecord, 'id' | 'race_start_time'>>(
     'SELECT id, race_start_time FROM races WHERE race_key = ?',
     [raceKey],
   );
@@ -76,7 +99,7 @@ export async function importRace(db, file, options = {}) {
           row.values.speed,
           row.values.gap_ahead,
           row.values.gap_leader,
-        ],
+        ] satisfies SqlParams,
       };
     });
 
@@ -100,7 +123,7 @@ export async function importRace(db, file, options = {}) {
           search_text
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
-      normalized.laps.map((lap) => {
+      normalized.laps.map((lap): SqlParams => {
         const rawRow = rawRows[lap.rowIndex];
         return [
           crypto.randomUUID(),

@@ -1,15 +1,41 @@
-import { escapeHtml } from '../../utils/format.js';
+import type {
+  AnnotationHandlers,
+  JournalEntry,
+  TimelineEvent,
+  TimelineViewHandle,
+  TimelineViewModel,
+} from '../../types';
+import { closestElement } from '../../utils/dom';
+import { escapeHtml } from '../../utils/format';
 
-export function mountTimelineView(container, handlers) {
-  const state = {
+interface TimelineHandlers extends Partial<AnnotationHandlers> {
+  onSelectLap?: (lapNumber: number) => void | Promise<void>;
+  isLocalEditingEnabled?: boolean;
+}
+
+interface TimelineState {
+  viewModel: TimelineViewModel | null;
+  editingJournalId: string | null;
+  isComposerExpanded: boolean;
+  isLocalEditingEnabled: boolean;
+}
+
+export function mountTimelineView(
+  container: HTMLElement,
+  handlers: TimelineHandlers,
+): TimelineViewHandle {
+  const state: TimelineState = {
     viewModel: null,
     editingJournalId: null,
     isComposerExpanded: false,
     isLocalEditingEnabled: Boolean(handlers?.isLocalEditingEnabled),
   };
 
-  container.addEventListener('submit', async (event) => {
-    const form = event.target.closest('form[data-action="journal-form"]');
+  container.addEventListener('submit', async (event: SubmitEvent) => {
+    const form = closestElement<HTMLFormElement>(
+      event.target,
+      'form[data-action="journal-form"]',
+    );
     if (!form) {
       return;
     }
@@ -38,13 +64,16 @@ export function mountTimelineView(container, handlers) {
     }
   });
 
-  container.addEventListener('click', async (event) => {
-    const button = event.target.closest('button[data-action]');
+  container.addEventListener('click', async (event: MouseEvent) => {
+    const button = closestElement<HTMLButtonElement>(
+      event.target,
+      'button[data-action]',
+    );
     if (!button) {
       return;
     }
 
-    const action = button.dataset.action;
+    const action = button.dataset.action ?? '';
 
     if (
       !state.isLocalEditingEnabled &&
@@ -87,7 +116,10 @@ export function mountTimelineView(container, handlers) {
     }
 
     if (action === 'delete-journal') {
-      await handlers.onDelete?.('journalEntry', button.dataset.id);
+      const id = button.dataset.id;
+      if (id) {
+        await handlers.onDelete?.('journalEntry', id);
+      }
       return;
     }
 
@@ -100,7 +132,7 @@ export function mountTimelineView(container, handlers) {
   });
 
   return {
-    render(viewModel) {
+    render(viewModel: TimelineViewModel | null) {
       state.viewModel = viewModel;
 
       const journalEntries = viewModel?.journalEntries || [];
@@ -116,7 +148,7 @@ export function mountTimelineView(container, handlers) {
   };
 }
 
-function renderCurrent(container, state) {
+function renderCurrent(container: HTMLElement, state: TimelineState): void {
   const viewModel = state.viewModel;
   if (!viewModel) {
     container.innerHTML =
@@ -148,7 +180,7 @@ function renderCurrent(container, state) {
     `;
 }
 
-function renderComposerCollapsed() {
+function renderComposerCollapsed(): string {
   return `
         <button
             type="button"
@@ -162,7 +194,10 @@ function renderComposerCollapsed() {
     `;
 }
 
-function renderComposerExpanded(viewModel, editingJournal) {
+function renderComposerExpanded(
+  viewModel: TimelineViewModel,
+  editingJournal: JournalEntry | null,
+): string {
   return `
         <section class="timeline-composer panel" aria-live="polite">
             <div class="panel-header timeline-composer-header">
@@ -175,7 +210,10 @@ function renderComposerExpanded(viewModel, editingJournal) {
     `;
 }
 
-function renderJournalForm(viewModel, editingJournal) {
+function renderJournalForm(
+  viewModel: TimelineViewModel,
+  editingJournal: JournalEntry | null,
+): string {
   const selectedLap = viewModel.selectedLapRow || null;
   // Do not auto-assign a lap for new journal entries.
   const defaultLapNumber = editingJournal?.lap_number ?? '';
@@ -218,7 +256,10 @@ function renderJournalForm(viewModel, editingJournal) {
     `;
 }
 
-function renderTimelineEvents(events, isLocalEditingEnabled) {
+function renderTimelineEvents(
+  events: TimelineEvent[],
+  isLocalEditingEnabled: boolean,
+): string {
   if (!events.length) {
     return '<div class="timeline-empty">No timeline events match the current filters.</div>';
   }
@@ -230,7 +271,10 @@ function renderTimelineEvents(events, isLocalEditingEnabled) {
     `;
 }
 
-function renderEventCard(eventItem, isLocalEditingEnabled) {
+function renderEventCard(
+  eventItem: TimelineEvent,
+  isLocalEditingEnabled: boolean,
+): string {
   const timeLabel = formatIsoTimestamp(eventItem.event_time_iso);
   const lapLabel = Number.isInteger(eventItem.lap_number)
     ? `Lap ${eventItem.lap_number}`
@@ -267,7 +311,11 @@ function renderEventCard(eventItem, isLocalEditingEnabled) {
     `;
 }
 
-function renderDriverSwitchCard(eventItem, timeLabel, lapLabel) {
+function renderDriverSwitchCard(
+  eventItem: TimelineEvent,
+  timeLabel: string,
+  lapLabel: string,
+): string {
   const oldDriverName = `${eventItem.old_driver_name ?? ''}`.trim();
   const newDriverName =
     `${eventItem.new_driver_name ?? eventItem.driver_name ?? ''}`.trim();
@@ -293,8 +341,15 @@ function renderDriverSwitchCard(eventItem, timeLabel, lapLabel) {
     `;
 }
 
-function computeLapIso(raceStartTime, lapStartOffsetMs) {
-  if (!raceStartTime || !Number.isFinite(lapStartOffsetMs)) {
+function computeLapIso(
+  raceStartTime: string | null | undefined,
+  lapStartOffsetMs: number | null | undefined,
+): string | null {
+  if (
+    !raceStartTime ||
+    typeof lapStartOffsetMs !== 'number' ||
+    !Number.isFinite(lapStartOffsetMs)
+  ) {
     return null;
   }
 
@@ -306,7 +361,7 @@ function computeLapIso(raceStartTime, lapStartOffsetMs) {
   return new Date(startDate.getTime() + lapStartOffsetMs).toISOString();
 }
 
-function formatIsoTimestamp(value) {
+function formatIsoTimestamp(value: string | null | undefined): string {
   const date = value ? new Date(value) : null;
   if (!date || Number.isNaN(date.getTime())) {
     return '-';
@@ -321,7 +376,7 @@ function formatIsoTimestamp(value) {
   return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
 
-function datetimeLocalToIso(value) {
+function datetimeLocalToIso(value: string | null | undefined): string | null {
   const trimmed = `${value ?? ''}`.trim();
   if (!trimmed) {
     return null;
@@ -335,7 +390,7 @@ function datetimeLocalToIso(value) {
   return parsed.toISOString();
 }
 
-function isoToDatetimeLocal(value) {
+function isoToDatetimeLocal(value: string | null | undefined): string {
   if (!value) {
     return '';
   }

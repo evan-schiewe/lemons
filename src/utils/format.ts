@@ -2,17 +2,25 @@ const numberFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 1,
 });
 
-export function formatNumber(value, fallback = '-') {
-  return Number.isFinite(value) ? numberFormatter.format(value) : fallback;
+export function formatNumber(
+  value: number | null | undefined,
+  fallback = '-',
+): string {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? numberFormatter.format(value)
+    : fallback;
 }
 
-export function formatSpeed(value, fallback = '-') {
-  return Number.isFinite(value)
+export function formatSpeed(
+  value: number | null | undefined,
+  fallback = '-',
+): string {
+  return typeof value === 'number' && Number.isFinite(value)
     ? `${numberFormatter.format(value)} mph`
     : fallback;
 }
 
-export function escapeHtml(value) {
+export function escapeHtml(value: unknown): string {
   return `${value ?? ''}`
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -21,7 +29,7 @@ export function escapeHtml(value) {
     .replace(/'/g, '&#39;');
 }
 
-export function slugify(value) {
+export function slugify(value: unknown): string {
   return (
     `${value ?? ''}`
       .toLowerCase()
@@ -31,7 +39,7 @@ export function slugify(value) {
   );
 }
 
-export function downloadBlob(blob, fileName) {
+export function downloadBlob(blob: Blob, fileName: string): void {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

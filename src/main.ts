@@ -1,11 +1,11 @@
 import './styles.css';
-import { SQLiteClient } from './db/sqliteClient.js';
-import { mountAnnotationHelper } from './features/annotations/annotationHelperView.js';
-import { mountAnnotationPanel } from './features/annotations/annotationPanel.js';
-import { createAnnotationStore } from './features/annotations/annotationStore.js';
-import { exportAnnotationsFile } from './features/export/exportAnnotations.js';
-import { exportDatabaseFile } from './features/export/exportDb.js';
-import { importRace } from './features/import/importRace.js';
+import { SQLiteClient } from './db/sqliteClient';
+import { mountAnnotationHelper } from './features/annotations/annotationHelperView';
+import { mountAnnotationPanel } from './features/annotations/annotationPanel';
+import { createAnnotationStore } from './features/annotations/annotationStore';
+import { exportAnnotationsFile } from './features/export/exportAnnotations';
+import { exportDatabaseFile } from './features/export/exportDb';
+import { importRace } from './features/import/importRace';
 import {
   augmentCandidateWithReviewStatus,
   getCandidates,
@@ -17,41 +17,106 @@ import {
   getRaceSnapshot,
   getRaceTimelineEvents,
   getSummary,
-} from './features/query/raceQueries.js';
+} from './features/query/raceQueries';
 import {
   renderLapTable,
   scrollToLap,
   updateSortIndicators,
-} from './features/table/lapTable.js';
-import { mountTimelineView } from './features/timeline/timelineView.js';
+} from './features/table/lapTable';
+import { mountTimelineView } from './features/timeline/timelineView';
+import type {
+  AnnotationHandlers,
+  AnnotationKind,
+  AnnotationPayload,
+  AnnotationStore,
+  LapFilters,
+  LapRangeBounds,
+  LapRow,
+  LapTimeChartHandle,
+  RaceAnnotations,
+  RaceRecord,
+  SortColumn,
+  SortState,
+  SummaryRow,
+  TimelineEvent,
+} from './types';
+import { closestElement, errorMessage, queryRequired } from './utils/dom';
 
 const isLocalEditingEnabled = import.meta.env.DEV;
 
-const refs = {
+interface AppRefs {
+  appInitStatus: HTMLElement | null;
+  heroActionsHost: HTMLElement;
+  dataActions: HTMLElement;
+  dataActionsSlot: HTMLElement;
+  csvInput: HTMLInputElement;
+  sqliteInput: HTMLInputElement;
+  exportJson: HTMLButtonElement;
+  exportSqlite: HTMLButtonElement;
+  raceSelect: HTMLSelectElement;
+  driverFilter: HTMLSelectElement;
+  searchFilter: HTMLInputElement;
+  lapMin: HTMLInputElement;
+  lapMax: HTMLInputElement;
+  summaryGreenOnly: HTMLInputElement;
+  importStatus: HTMLElement;
+  summaryCards: HTMLElement;
+  tableBody: HTMLTableSectionElement;
+  table: HTMLTableElement;
+  helperContainer: HTMLElement;
+  annotationPanelContainer: HTMLElement;
+  timelineContainer: HTMLElement;
+  dataTabButton: HTMLButtonElement;
+  tabButtons: NodeListOf<HTMLButtonElement>;
+  tabContents: NodeListOf<HTMLElement>;
+  annotationSubtabButtons: NodeListOf<HTMLButtonElement>;
+  annotationSubtabContents: NodeListOf<HTMLElement>;
+}
+
+interface AppState {
+  db: SQLiteClient | null;
+  annotationStore: AnnotationStore | null;
+  races: RaceRecord[];
+  activeRaceId: string;
+  selectedLapId: string;
+  sort: SortState;
+  currentRows: LapRow[];
+  currentAnnotations: RaceAnnotations;
+  currentTimelineEvents: TimelineEvent[];
+  helperMode: boolean;
+  helperCurrentIndex: number;
+  helperAutoAdvance: boolean;
+  helperViewMode: 'queue' | 'form';
+  lapRangeBounds: LapRangeBounds | null;
+  lapRangeRaceId: string;
+  summaryGreenOnly: boolean;
+}
+
+const refs: AppRefs = {
   appInitStatus: document.querySelector('#app-init-status'),
-  heroActionsHost: document.querySelector('#hero-actions-host'),
-  dataActions: document.querySelector('#data-actions'),
-  dataActionsSlot: document.querySelector('#data-actions-slot'),
-  csvInput: document.querySelector('#csv-input'),
-  sqliteInput: document.querySelector('#sqlite-input'),
-  exportJson: document.querySelector('#export-json'),
-  exportSqlite: document.querySelector('#export-sqlite'),
-  raceSelect: document.querySelector('#race-select'),
-  driverFilter: document.querySelector('#driver-filter'),
-  searchFilter: document.querySelector('#search-filter'),
-  lapMin: document.querySelector('#lap-min'),
-  lapMax: document.querySelector('#lap-max'),
-  summaryGreenOnly: document.querySelector('#summary-green-only'),
-  importStatus: document.querySelector('#import-status'),
-  summaryCards: document.querySelector('#summary-cards'),
-  tableBody: document.querySelector('#lap-table-body'),
-  table: document.querySelector('table'),
-  helperContainer: document.querySelector('#annotation-helper-container'),
-  annotationPanelContainer: document.querySelector(
+  heroActionsHost: queryRequired<HTMLElement>('#hero-actions-host'),
+  dataActions: queryRequired<HTMLElement>('#data-actions'),
+  dataActionsSlot: queryRequired<HTMLElement>('#data-actions-slot'),
+  csvInput: queryRequired<HTMLInputElement>('#csv-input'),
+  sqliteInput: queryRequired<HTMLInputElement>('#sqlite-input'),
+  exportJson: queryRequired<HTMLButtonElement>('#export-json'),
+  exportSqlite: queryRequired<HTMLButtonElement>('#export-sqlite'),
+  raceSelect: queryRequired<HTMLSelectElement>('#race-select'),
+  driverFilter: queryRequired<HTMLSelectElement>('#driver-filter'),
+  searchFilter: queryRequired<HTMLInputElement>('#search-filter'),
+  lapMin: queryRequired<HTMLInputElement>('#lap-min'),
+  lapMax: queryRequired<HTMLInputElement>('#lap-max'),
+  summaryGreenOnly: queryRequired<HTMLInputElement>('#summary-green-only'),
+  importStatus: queryRequired<HTMLElement>('#import-status'),
+  summaryCards: queryRequired<HTMLElement>('#summary-cards'),
+  tableBody: queryRequired<HTMLTableSectionElement>('#lap-table-body'),
+  table: queryRequired<HTMLTableElement>('table'),
+  helperContainer: queryRequired<HTMLElement>('#annotation-helper-container'),
+  annotationPanelContainer: queryRequired<HTMLElement>(
     '#annotation-panel-container',
   ),
-  timelineContainer: document.querySelector('#timeline-container'),
-  dataTabButton: document.querySelector('#data-tab-button'),
+  timelineContainer: queryRequired<HTMLElement>('#timeline-container'),
+  dataTabButton: queryRequired<HTMLButtonElement>('#data-tab-button'),
   tabButtons: document.querySelectorAll('.tab-button'),
   tabContents: document.querySelectorAll('.tab-content'),
   annotationSubtabButtons: document.querySelectorAll(
@@ -62,7 +127,7 @@ const refs = {
   ),
 };
 
-const state = {
+const state: AppState = {
   db: null,
   annotationStore: null,
   races: [],
@@ -91,23 +156,43 @@ const state = {
 };
 
 const charts = {
-  lapTime: null,
+  lapTime: null as LapTimeChartHandle | null,
 };
 
-let chartModulesPromise = null;
-let createLapTimeChart = null;
-let renderSummaryCards = null;
+let chartModulesPromise: Promise<void> | null = null;
+let createLapTimeChart:
+  | typeof import('./features/charts/lapTimeChart').createLapTimeChart
+  | null = null;
+let renderSummaryCards:
+  | typeof import('./features/dashboard/summaryCards').renderSummaryCards
+  | null = null;
 
 // Placeholder for annotation helper - will be initialized when module is created
-let annotationHelper = null;
-let annotationPanel = null;
-let timelineView = null;
+let annotationHelper: ReturnType<typeof mountAnnotationHelper> | null = null;
+let annotationPanel: ReturnType<typeof mountAnnotationPanel> | null = null;
+let timelineView: ReturnType<typeof mountTimelineView> | null = null;
 
-async function ensureChartModules() {
+function getDb(): SQLiteClient {
+  if (!state.db) {
+    throw new Error('Database is not initialized.');
+  }
+
+  return state.db;
+}
+
+function getAnnotationStore(): AnnotationStore {
+  if (!state.annotationStore) {
+    throw new Error('Annotation store is not initialized.');
+  }
+
+  return state.annotationStore;
+}
+
+async function ensureChartModules(): Promise<void> {
   if (!chartModulesPromise) {
     chartModulesPromise = Promise.all([
-      import('./features/charts/lapTimeChart.js'),
-      import('./features/dashboard/summaryCards.js'),
+      import('./features/charts/lapTimeChart'),
+      import('./features/dashboard/summaryCards'),
     ]).then(([lapTimeChartModule, summaryCardsModule]) => {
       createLapTimeChart = lapTimeChartModule.createLapTimeChart;
       renderSummaryCards = summaryCardsModule.renderSummaryCards;
@@ -117,51 +202,64 @@ async function ensureChartModules() {
   await chartModulesPromise;
 }
 
-async function ensureLapTimeChart() {
+async function ensureLapTimeChart(): Promise<LapTimeChartHandle> {
   if (charts.lapTime) {
     return charts.lapTime;
   }
 
   await ensureChartModules();
-  charts.lapTime = createLapTimeChart(
-    document.querySelector('#lap-time-chart'),
-    {
-      onSelectLap: handleLapSelectionByNumber,
-      onLapRangeChange: handleLapRangeZoom,
-    },
-  );
+  if (!createLapTimeChart) {
+    throw new Error('Chart module did not load.');
+  }
+
+  charts.lapTime = createLapTimeChart(queryRequired('#lap-time-chart'), {
+    onSelectLap: handleLapSelectionByNumber,
+    onLapRangeChange: handleLapRangeZoom,
+  });
 
   return charts.lapTime;
 }
 
-async function renderSummaryCardsLazy(summary, lapRows, options) {
+async function renderSummaryCardsLazy(
+  summary: SummaryRow,
+  lapRows: LapRow[],
+  options: { greenFlagOnly?: boolean },
+): Promise<void> {
   await ensureChartModules();
+  if (!renderSummaryCards) {
+    throw new Error('Summary module did not load.');
+  }
   renderSummaryCards(refs.summaryCards, summary, lapRows, options);
 }
 
-function createAnnotationHandlers({ autoAdvanceOnSave = false } = {}) {
+function createAnnotationHandlers({
+  autoAdvanceOnSave = false,
+}: {
+  autoAdvanceOnSave?: boolean;
+} = {}): AnnotationHandlers {
   return {
-    onSave: async (kind, payload) => {
+    onSave: async (kind: AnnotationKind, payload: AnnotationPayload) => {
       if (!state.activeRaceId) {
         setStatus('Import a race before saving annotations.');
         return false;
       }
 
       try {
-        await state.annotationStore.save(kind, {
+        await getAnnotationStore().save(kind, {
           ...payload,
           race_id: state.activeRaceId,
         });
         setStatus('Annotation saved.');
 
         if (autoAdvanceOnSave && state.helperAutoAdvance) {
-          const candidates = getCandidates(state.db, state.activeRaceId);
-          const annotations = getRaceAnnotations(state.db, state.activeRaceId);
+          const db = getDb();
+          const candidates = getCandidates(db, state.activeRaceId);
+          const annotations = getRaceAnnotations(db, state.activeRaceId);
           const augmented = candidates.map((candidate) =>
             augmentCandidateWithReviewStatus(
               candidate,
               annotations,
-              state.db,
+              db,
               state.activeRaceId,
             ),
           );
@@ -182,18 +280,18 @@ function createAnnotationHandlers({ autoAdvanceOnSave = false } = {}) {
         return true;
       } catch (error) {
         console.error(error);
-        setStatus(`Unable to save annotation: ${error.message}`);
+        setStatus(`Unable to save annotation: ${errorMessage(error)}`);
         return false;
       }
     },
-    onDelete: async (kind, id) => {
+    onDelete: async (kind: AnnotationKind, id: string) => {
       try {
-        await state.annotationStore.remove(kind, id);
+        await getAnnotationStore().remove(kind, id);
         setStatus('Annotation removed.');
         await refreshView();
       } catch (error) {
         console.error(error);
-        setStatus(`Unable to remove annotation: ${error.message}`);
+        setStatus(`Unable to remove annotation: ${errorMessage(error)}`);
       }
     },
   };
@@ -201,11 +299,11 @@ function createAnnotationHandlers({ autoAdvanceOnSave = false } = {}) {
 
 initialize().catch((error) => {
   console.error(error);
-  setStatus(`Initialization failed: ${error.message}`);
+  setStatus(`Initialization failed: ${errorMessage(error)}`);
   setAppLoadingState(false);
 });
 
-async function initialize() {
+async function initialize(): Promise<void> {
   setAppLoadingState(true);
   setStatus('Initializing browser SQLite cache...');
   state.db = await new SQLiteClient().init();
@@ -218,93 +316,86 @@ async function initialize() {
     persistedSummaryGreenOnly == null
       ? true
       : persistedSummaryGreenOnly === '1';
-  if (refs.summaryGreenOnly) {
-    refs.summaryGreenOnly.checked = state.summaryGreenOnly;
-  }
+  refs.summaryGreenOnly.checked = state.summaryGreenOnly;
 
   // Initialize annotation helper
   const helperContainer = refs.helperContainer;
-  if (helperContainer) {
-    annotationHelper = mountAnnotationHelper(helperContainer, {
-      ...createAnnotationHandlers({ autoAdvanceOnSave: true }),
-      onOpenComposer: (kind, options) => {
-        annotationPanel?.openComposer(kind, options);
-      },
-      onOpenEditor: (kind, id) => {
-        annotationPanel?.openEditor(kind, id);
-      },
-      onNavigate: (direction) => {
-        const candidates = getCandidates(state.db, state.activeRaceId);
-        if (!candidates.length) {
-          return;
+  annotationHelper = mountAnnotationHelper(helperContainer, {
+    ...createAnnotationHandlers({ autoAdvanceOnSave: true }),
+    onOpenComposer: (kind, options) => {
+      annotationPanel?.openComposer(kind, options);
+    },
+    onOpenEditor: (kind, id) => {
+      annotationPanel?.openEditor(kind, id);
+    },
+    onNavigate: (direction) => {
+      const db = getDb();
+      const candidates = getCandidates(db, state.activeRaceId);
+      if (!candidates.length) {
+        return;
+      }
+
+      const annotations = getRaceAnnotations(db, state.activeRaceId);
+      const augmented = candidates.map((c) =>
+        augmentCandidateWithReviewStatus(
+          c,
+          annotations,
+          db,
+          state.activeRaceId,
+        ),
+      );
+
+      if (direction === 'prev') {
+        if (state.helperCurrentIndex > 0) {
+          state.helperCurrentIndex--;
         }
-
-        const annotations = getRaceAnnotations(state.db, state.activeRaceId);
-        const augmented = candidates.map((c) =>
-          augmentCandidateWithReviewStatus(
-            c,
-            annotations,
-            state.db,
-            state.activeRaceId,
-          ),
+      } else if (direction === 'next') {
+        if (state.helperCurrentIndex < augmented.length - 1) {
+          state.helperCurrentIndex++;
+        }
+      } else if (direction === 'jump-unresolved') {
+        // Jump to first unreviewed candidate
+        const nextUnreviewed = augmented.findIndex(
+          (c, i) => i > state.helperCurrentIndex && !c.isReviewed,
         );
-
-        if (direction === 'prev') {
-          if (state.helperCurrentIndex > 0) {
-            state.helperCurrentIndex--;
-          }
-        } else if (direction === 'next') {
-          if (state.helperCurrentIndex < augmented.length - 1) {
-            state.helperCurrentIndex++;
-          }
-        } else if (direction === 'jump-unresolved') {
-          // Jump to first unreviewed candidate
-          const nextUnreviewed = augmented.findIndex(
-            (c, i) => i > state.helperCurrentIndex && !c.isReviewed,
-          );
-          if (nextUnreviewed >= 0) {
-            state.helperCurrentIndex = nextUnreviewed;
-          } else {
-            // Wrap around to find first unreviewed from beginning
-            const firstUnreviewed = augmented.findIndex((c) => !c.isReviewed);
-            if (firstUnreviewed >= 0) {
-              state.helperCurrentIndex = firstUnreviewed;
-            }
+        if (nextUnreviewed >= 0) {
+          state.helperCurrentIndex = nextUnreviewed;
+        } else {
+          // Wrap around to find first unreviewed from beginning
+          const firstUnreviewed = augmented.findIndex((c) => !c.isReviewed);
+          if (firstUnreviewed >= 0) {
+            state.helperCurrentIndex = firstUnreviewed;
           }
         }
+      }
 
-        refreshView();
-      },
-      onToggleAutoAdvance: () => {
-        state.helperAutoAdvance = !state.helperAutoAdvance;
-        localStorage.setItem(
-          'helperAutoAdvance',
-          state.helperAutoAdvance ? '1' : '0',
-        );
-        refreshView();
-      },
-    });
-  }
+      refreshView();
+    },
+    onToggleAutoAdvance: () => {
+      state.helperAutoAdvance = !state.helperAutoAdvance;
+      localStorage.setItem(
+        'helperAutoAdvance',
+        state.helperAutoAdvance ? '1' : '0',
+      );
+      refreshView();
+    },
+  });
 
-  if (refs.annotationPanelContainer) {
-    annotationPanel = mountAnnotationPanel(
-      refs.annotationPanelContainer,
-      createAnnotationHandlers(),
-    );
-  }
+  annotationPanel = mountAnnotationPanel(
+    refs.annotationPanelContainer,
+    createAnnotationHandlers(),
+  );
 
-  if (refs.timelineContainer) {
-    timelineView = mountTimelineView(refs.timelineContainer, {
-      ...createAnnotationHandlers(),
-      onSelectLap: handleLapSelectionByNumber,
-      isLocalEditingEnabled,
-    });
-  }
+  timelineView = mountTimelineView(refs.timelineContainer, {
+    ...createAnnotationHandlers(),
+    onSelectLap: handleLapSelectionByNumber,
+    isLocalEditingEnabled,
+  });
 
   wireEvents();
   await refreshRaceOptions();
   await refreshView();
-  if (state.db.didRefreshBundledDatabase) {
+  if (getDb().didRefreshBundledDatabase) {
     setAppLoadingState(false);
     setStatus(
       'Ready. Detected a newer deployment and refreshed the local bundled database cache.',
@@ -316,21 +407,25 @@ async function initialize() {
   setStatus('Ready. Import lap CSV files or restore a SQLite export to begin.');
 }
 
-function wireEvents() {
+function wireEvents(): void {
   refs.csvInput.addEventListener('change', handleImport);
   refs.sqliteInput.addEventListener('change', handleRestoreSqlite);
   refs.raceSelect.addEventListener('change', async (event) => {
-    state.activeRaceId = event.target.value;
+    state.activeRaceId = (event.currentTarget as HTMLSelectElement).value;
     state.selectedLapId = '';
     await refreshDriverOptions();
     await refreshView();
   });
-  refs.driverFilter.addEventListener('change', refreshView);
-  refs.searchFilter.addEventListener('input', refreshView);
+  refs.driverFilter.addEventListener('change', () => {
+    refreshView();
+  });
+  refs.searchFilter.addEventListener('input', () => {
+    refreshView();
+  });
   refs.lapMin.addEventListener('input', () => handleLapRangeInput('lapMin'));
   refs.lapMax.addEventListener('input', () => handleLapRangeInput('lapMax'));
   refs.summaryGreenOnly.addEventListener('change', async (event) => {
-    state.summaryGreenOnly = event.target.checked;
+    state.summaryGreenOnly = (event.currentTarget as HTMLInputElement).checked;
     localStorage.setItem(
       'summaryGreenOnly',
       state.summaryGreenOnly ? '1' : '0',
@@ -339,33 +434,45 @@ function wireEvents() {
   });
   refs.exportJson.addEventListener('click', () => {
     if (state.activeRaceId) {
-      exportAnnotationsFile(state.db, state.activeRaceId);
+      exportAnnotationsFile(getDb(), state.activeRaceId);
     }
   });
   refs.exportSqlite.addEventListener('click', () => {
     const activeRace = state.races.find(
       (race) => race.id === state.activeRaceId,
     );
-    exportDatabaseFile(state.db, activeRace?.name || 'lemons-race-viewer');
+    exportDatabaseFile(getDb(), activeRace?.name || 'lemons-race-viewer');
   });
-  refs.table.querySelector('thead').addEventListener('click', async (event) => {
-    const header = event.target.closest('th[data-sort]');
-    if (!header) {
-      return;
-    }
+  queryRequired<HTMLTableSectionElement>('thead', refs.table).addEventListener(
+    'click',
+    async (event) => {
+      const header = closestElement<HTMLTableCellElement>(
+        event.target,
+        'th[data-sort]',
+      );
+      if (!header) {
+        return;
+      }
 
-    const column = header.dataset.sort;
-    if (state.sort.column === column) {
-      state.sort.direction = state.sort.direction === 'asc' ? 'desc' : 'asc';
-    } else {
-      state.sort.column = column;
-      state.sort.direction = 'asc';
-    }
+      const column = header.dataset.sort as SortColumn | undefined;
+      if (!column) {
+        return;
+      }
+      if (state.sort.column === column) {
+        state.sort.direction = state.sort.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        state.sort.column = column;
+        state.sort.direction = 'asc';
+      }
 
-    await refreshView();
-  });
+      await refreshView();
+    },
+  );
   refs.tableBody.addEventListener('click', async (event) => {
-    const row = event.target.closest('tr[data-lap-id]');
+    const row = closestElement<HTMLTableRowElement>(
+      event.target,
+      'tr[data-lap-id]',
+    );
     if (!row) {
       return;
     }
@@ -386,7 +493,7 @@ function wireEvents() {
   setupAnnotationSubtabs();
 }
 
-function setupTabSwitching() {
+function setupTabSwitching(): void {
   const annotationsTabButton = Array.from(refs.tabButtons).find(
     (btn) => btn.dataset.tab === 'annotations',
   );
@@ -396,20 +503,21 @@ function setupTabSwitching() {
 
   refs.tabButtons.forEach((button) => {
     button.addEventListener('click', (event) => {
-      const tabName = event.target.dataset.tab;
+      const clickedButton = event.currentTarget as HTMLButtonElement;
+      const tabName = clickedButton.dataset.tab;
       if (!tabName) return;
 
       // Update active button
       refs.tabButtons.forEach((btn) => {
         btn.classList.remove('active');
       });
-      event.target.classList.add('active');
+      clickedButton.classList.add('active');
 
       // Update active tab content
       refs.tabContents.forEach((content) => {
         content.classList.remove('active');
       });
-      const activeTab = document.querySelector(`#${tabName}-tab`);
+      const activeTab = document.querySelector<HTMLElement>(`#${tabName}-tab`);
       if (activeTab) {
         activeTab.classList.add('active');
         // Trigger chart resize if showing chart tab
@@ -440,12 +548,10 @@ function setupTabSwitching() {
   }
 }
 
-function syncDataTabAndActions() {
+function syncDataTabAndActions(): void {
   const hasData = state.races.length > 0;
 
-  if (refs.dataTabButton) {
-    refs.dataTabButton.hidden = !hasData;
-  }
+  refs.dataTabButton.hidden = !hasData;
 
   const activeDataButton = Array.from(refs.tabButtons).find(
     (btn) => btn.dataset.tab === 'data' && btn.classList.contains('active'),
@@ -458,38 +564,33 @@ function syncDataTabAndActions() {
   }
 
   const targetHost = hasData ? refs.dataActionsSlot : refs.heroActionsHost;
-  if (
-    targetHost &&
-    refs.dataActions &&
-    refs.dataActions.parentElement !== targetHost
-  ) {
+  if (refs.dataActions.parentElement !== targetHost) {
     targetHost.append(refs.dataActions);
   }
 
-  if (refs.heroActionsHost) {
-    refs.heroActionsHost.hidden = hasData;
-  }
+  refs.heroActionsHost.hidden = hasData;
 }
 
-function setupAnnotationSubtabs() {
+function setupAnnotationSubtabs(): void {
   refs.annotationSubtabButtons.forEach((button) => {
     button.addEventListener('click', (event) => {
-      const subtabName = event.target.dataset.annotationTab;
+      const clickedButton = event.currentTarget as HTMLButtonElement;
+      const subtabName = clickedButton.dataset.annotationTab;
       if (!subtabName) return;
 
       refs.annotationSubtabButtons.forEach((btn) => {
         btn.classList.remove('active');
         btn.setAttribute('aria-selected', 'false');
       });
-      event.target.classList.add('active');
-      event.target.setAttribute('aria-selected', 'true');
+      clickedButton.classList.add('active');
+      clickedButton.setAttribute('aria-selected', 'true');
 
       refs.annotationSubtabContents.forEach((content) => {
         content.classList.remove('active');
         content.hidden = true;
       });
 
-      const activeSubtab = document.querySelector(
+      const activeSubtab = document.querySelector<HTMLElement>(
         `#annotation-${subtabName}-tab`,
       );
       if (activeSubtab) {
@@ -511,13 +612,15 @@ function setupAnnotationSubtabs() {
   }
 }
 
-async function handleImport(event) {
-  const files = Array.from(event.target.files ?? []);
+async function handleImport(event: Event): Promise<void> {
+  const input = event.currentTarget as HTMLInputElement;
+  const files = Array.from(input.files ?? []);
   if (!files.length) {
     return;
   }
 
-  const messages = [];
+  const messages: string[] = [];
+  const db = getDb();
   for (const file of files) {
     const importOptions = promptForRaceImportOptions(file.name);
     if (importOptions.cancelled) {
@@ -527,7 +630,7 @@ async function handleImport(event) {
     }
 
     setStatus(`Importing ${file.name}...`);
-    const result = await importRace(state.db, file, {
+    const result = await importRace(db, file, {
       raceStartTime: importOptions.raceStartTime,
     });
     messages.push(
@@ -542,8 +645,9 @@ async function handleImport(event) {
   setStatus(`Import complete. ${messages.join(' | ')}`);
 }
 
-async function handleRestoreSqlite(event) {
-  const [file] = Array.from(event.target.files ?? []);
+async function handleRestoreSqlite(event: Event): Promise<void> {
+  const input = event.currentTarget as HTMLInputElement;
+  const [file] = Array.from(input.files ?? []);
   if (!file) {
     return;
   }
@@ -551,7 +655,7 @@ async function handleRestoreSqlite(event) {
   try {
     setStatus(`Restoring SQLite from ${file.name}...`);
     const bytes = new Uint8Array(await file.arrayBuffer());
-    await state.db.restoreDatabase(bytes);
+    await getDb().restoreDatabase(bytes);
 
     state.activeRaceId = '';
     state.selectedLapId = '';
@@ -568,12 +672,12 @@ async function handleRestoreSqlite(event) {
   } catch (error) {
     console.error(error);
     refs.sqliteInput.value = '';
-    setStatus(`SQLite restore failed: ${error.message}`);
+    setStatus(`SQLite restore failed: ${errorMessage(error)}`);
   }
 }
 
-async function refreshRaceOptions() {
-  state.races = getRaceList(state.db);
+async function refreshRaceOptions(): Promise<void> {
+  state.races = getRaceList(getDb());
   syncDataTabAndActions();
 
   refs.raceSelect.innerHTML = state.races.length
@@ -590,10 +694,10 @@ async function refreshRaceOptions() {
   await refreshDriverOptions();
 }
 
-async function refreshDriverOptions() {
+async function refreshDriverOptions(): Promise<void> {
   const selectedDriver = refs.driverFilter.value;
   const drivers = state.activeRaceId
-    ? getDriverOptions(state.db, state.activeRaceId)
+    ? getDriverOptions(getDb(), state.activeRaceId)
     : [];
   refs.driverFilter.innerHTML = [
     '<option value="">All drivers</option>',
@@ -604,7 +708,9 @@ async function refreshDriverOptions() {
     : '';
 }
 
-async function refreshView(options = {}) {
+async function refreshView(
+  options: { skipChartRender?: boolean } = {},
+): Promise<void> {
   const { skipChartRender = false } = options;
   updateSortIndicators(refs.table, state.sort);
 
@@ -646,15 +752,22 @@ async function refreshView(options = {}) {
     return;
   }
 
+  const db = getDb();
   const baseFilters = getBaseFilters();
+  const raceLapSeries = getLapSeries(db, state.activeRaceId, {
+    driver: '',
+    search: '',
+    lapMin: null,
+    lapMax: null,
+  });
+  const lapRangeBounds = getLapBounds(raceLapSeries);
+  state.lapRangeBounds = lapRangeBounds;
   const chartFilters = {
     ...baseFilters,
     lapMin: null,
     lapMax: null,
   };
-  const lapSeries = getLapSeries(state.db, state.activeRaceId, chartFilters);
-  const lapRangeBounds = getLapBounds(lapSeries);
-  state.lapRangeBounds = lapRangeBounds;
+  const lapSeries = getLapSeries(db, state.activeRaceId, chartFilters);
   const forceToBounds = state.lapRangeRaceId !== state.activeRaceId;
   const { lapMin, lapMax } = syncLapRangeInputs(lapRangeBounds, {
     prefill: true,
@@ -667,15 +780,10 @@ async function refreshView(options = {}) {
     lapMax,
   };
 
-  const rows = getLapTableRows(
-    state.db,
-    state.activeRaceId,
-    filters,
-    state.sort,
-  );
-  const summary = getSummary(state.db, state.activeRaceId, filters);
-  const annotations = getRaceAnnotations(state.db, state.activeRaceId);
-  const timelineEvents = getRaceTimelineEvents(state.db, state.activeRaceId);
+  const rows = getLapTableRows(db, state.activeRaceId, filters, state.sort);
+  const summary = getSummary(db, state.activeRaceId, filters);
+  const annotations = getRaceAnnotations(db, state.activeRaceId);
+  const timelineEvents = getRaceTimelineEvents(db, state.activeRaceId);
 
   state.currentRows = rows;
   state.currentAnnotations = annotations;
@@ -700,7 +808,9 @@ async function refreshView(options = {}) {
 
   if (!skipChartRender) {
     const lapTimeChart = await ensureLapTimeChart();
-    lapTimeChart.render(lapSeries, annotations);
+    lapTimeChart.render(lapSeries, annotations, {
+      lapAxisBounds: lapRangeBounds,
+    });
     lapTimeChart.setLapRange(filters.lapMin, filters.lapMax);
   }
   // BUG FIX: charts.position was initialized but render() was never defined. Skip for now.
@@ -711,8 +821,8 @@ async function refreshView(options = {}) {
 
   // Helper view: compute candidate queue and augmented review status
   if (annotationHelper) {
-    const candidates = getCandidates(state.db, state.activeRaceId);
-    const raceSnapshot = getRaceSnapshot(state.db, state.activeRaceId);
+    const candidates = getCandidates(db, state.activeRaceId);
+    const raceSnapshot = getRaceSnapshot(db, state.activeRaceId);
     const lapStartOffsets = new Map(
       raceSnapshot.laps.map((lap) => [
         lap.lap_number,
@@ -725,7 +835,7 @@ async function refreshView(options = {}) {
       const reviewed = augmentCandidateWithReviewStatus(
         candidate,
         annotations,
-        state.db,
+        db,
         state.activeRaceId,
       );
 
@@ -766,11 +876,23 @@ async function refreshView(options = {}) {
   }
 }
 
-async function handleLapRangeZoom({ lapMin, lapMax }) {
+async function handleLapRangeZoom({
+  lapMin,
+  lapMax,
+}: {
+  lapMin: number | null;
+  lapMax: number | null;
+}): Promise<void> {
   const currentMin = parseIntegerOrNull(refs.lapMin.value);
   const currentMax = parseIntegerOrNull(refs.lapMax.value);
-  const nextMin = Number.isFinite(lapMin) ? Math.round(lapMin) : null;
-  const nextMax = Number.isFinite(lapMax) ? Math.round(lapMax) : null;
+  const nextMin =
+    typeof lapMin === 'number' && Number.isFinite(lapMin)
+      ? Math.round(lapMin)
+      : null;
+  const nextMax =
+    typeof lapMax === 'number' && Number.isFinite(lapMax)
+      ? Math.round(lapMax)
+      : null;
 
   const isSameMin =
     (Number.isFinite(currentMin) ? currentMin : null) === nextMin;
@@ -786,19 +908,21 @@ async function handleLapRangeZoom({ lapMin, lapMax }) {
   await refreshView({ skipChartRender: true });
 }
 
-async function handleLapRangeInput(changedField) {
+async function handleLapRangeInput(
+  changedField: 'lapMin' | 'lapMax',
+): Promise<void> {
   syncLapRangeInputs(state.lapRangeBounds, { prefill: true, changedField });
   await refreshView();
 }
 
-function getBaseFilters() {
+function getBaseFilters(): LapFilters {
   return {
     driver: refs.driverFilter.value,
     search: refs.searchFilter.value.trim(),
   };
 }
 
-function getLapBounds(rows) {
+function getLapBounds(rows: LapRow[]): LapRangeBounds | null {
   if (!Array.isArray(rows) || !rows.length) {
     return null;
   }
@@ -817,7 +941,14 @@ function getLapBounds(rows) {
   };
 }
 
-function syncLapRangeInputs(bounds, options = {}) {
+function syncLapRangeInputs(
+  bounds: LapRangeBounds | null,
+  options: {
+    prefill?: boolean;
+    changedField?: 'lapMin' | 'lapMax' | null;
+    forceToBounds?: boolean;
+  } = {},
+): { lapMin: number | null; lapMax: number | null } {
   const {
     prefill = false,
     changedField = null,
@@ -878,16 +1009,16 @@ function syncLapRangeInputs(bounds, options = {}) {
   return { lapMin, lapMax };
 }
 
-function parseIntegerOrNull(value) {
+function parseIntegerOrNull(value: string): number | null {
   const parsed = Number.parseInt(value, 10);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function clamp(value, min, max) {
+function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-async function handleLapSelectionByNumber(lapNumber) {
+async function handleLapSelectionByNumber(lapNumber: number): Promise<void> {
   const selectedRow = state.currentRows.find(
     (row) => row.lap_number === lapNumber,
   );
@@ -899,7 +1030,7 @@ async function handleLapSelectionByNumber(lapNumber) {
   scrollToLap(lapNumber);
 }
 
-async function selectLapAndOpenDetails(selectedRow) {
+async function selectLapAndOpenDetails(selectedRow: LapRow): Promise<void> {
   if (!selectedRow) {
     return;
   }
@@ -920,7 +1051,10 @@ async function selectLapAndOpenDetails(selectedRow) {
   });
 }
 
-function hasAnnotationsForLap(lapRow, annotations) {
+function hasAnnotationsForLap(
+  lapRow: LapRow,
+  annotations: RaceAnnotations,
+): boolean {
   if (!lapRow || !annotations) {
     return false;
   }
@@ -939,19 +1073,19 @@ function hasAnnotationsForLap(lapRow, annotations) {
   );
 }
 
-function setStatus(message) {
+function setStatus(message: string): void {
   refs.importStatus.textContent = message;
   if (refs.appInitStatus && document.body.classList.contains('app-loading')) {
     refs.appInitStatus.textContent = message;
   }
 }
 
-function setAppLoadingState(isLoading) {
+function setAppLoadingState(isLoading: boolean): void {
   document.body.classList.toggle('app-loading', isLoading);
   document.body.classList.toggle('app-ready', !isLoading);
 }
 
-function datetimeLocalToIso(value) {
+function datetimeLocalToIso(value: unknown): string | null {
   const trimmed = `${value ?? ''}`.trim();
   if (!trimmed) {
     return null;
@@ -965,7 +1099,10 @@ function datetimeLocalToIso(value) {
   return parsed.toISOString();
 }
 
-function promptForRaceImportOptions(fileName) {
+function promptForRaceImportOptions(fileName: string): {
+  cancelled: boolean;
+  raceStartTime: string | null;
+} {
   while (true) {
     const response = window.prompt(
       `Race start time for ${fileName}\nEnter local time as YYYY-MM-DDTHH:mm.\nLeave blank to skip.`,

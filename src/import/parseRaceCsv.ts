@@ -1,3 +1,5 @@
+import type { CsvRowValues, ParsedRaceCsv, ParsedRaceRow } from '../types';
+
 const DEFAULT_HEADERS = [
   'lap',
   'team_slot',
@@ -7,9 +9,11 @@ const DEFAULT_HEADERS = [
   'speed',
   'gap_ahead',
   'gap_leader',
-];
+] as const;
 
-const HEADER_ALIASES = {
+type CsvHeader = (typeof DEFAULT_HEADERS)[number];
+
+const HEADER_ALIASES: Record<CsvHeader, string[]> = {
   lap: ['lap', 'lap number', 'lap_no', 'lapno'],
   team_slot: ['team', 'entry', 'slot', 'vehicle'],
   driver: ['driver', 'driver name'],
@@ -27,7 +31,7 @@ const HEADER_ALIASES = {
   ],
 };
 
-export function parseRaceCsv(csvText) {
+export function parseRaceCsv(csvText: string): ParsedRaceCsv {
   // Normalize malformed CSV: replace `", lap` with ` lap`
   const normalizedText = csvText.replace(/", lap/g, ' lap');
   const lines = normalizedText
@@ -38,13 +42,15 @@ export function parseRaceCsv(csvText) {
     throw new Error('The selected CSV is empty.');
   }
 
-  const warnings = [];
+  const warnings: string[] = [];
   const firstTokens = repairTokens(tokenizeCsvLine(lines[0]), warnings, 1);
   const hasHeader = looksLikeHeader(firstTokens);
-  const headers = hasHeader ? normalizeHeaders(firstTokens) : DEFAULT_HEADERS;
+  const headers = hasHeader
+    ? normalizeHeaders(firstTokens)
+    : [...DEFAULT_HEADERS];
   const fieldMap = buildFieldMap(headers);
   const dataLines = hasHeader ? lines.slice(1) : lines;
-  const rows = [];
+  const rows: ParsedRaceRow[] = [];
 
   dataLines.forEach((line, index) => {
     const rowNumber = index + (hasHeader ? 2 : 1);
@@ -66,7 +72,7 @@ export function parseRaceCsv(csvText) {
       record[header] =
         fieldIndex >= 0 ? (repairedTokens[fieldIndex]?.trim() ?? '') : '';
       return record;
-    }, {});
+    }, {} as CsvRowValues);
 
     if (!mapped.lap) {
       warnings.push(`Skipped row ${rowNumber}: missing lap number.`);
@@ -87,7 +93,7 @@ export function parseRaceCsv(csvText) {
   }
 
   return {
-    headers: DEFAULT_HEADERS,
+    headers: [...DEFAULT_HEADERS],
     detectedHeaders: headers,
     hasHeader,
     warnings,
@@ -95,7 +101,7 @@ export function parseRaceCsv(csvText) {
   };
 }
 
-function tokenizeCsvLine(line) {
+function tokenizeCsvLine(line: string): string[] {
   const tokens = [];
   let current = '';
   let inQuotes = false;
@@ -127,7 +133,11 @@ function tokenizeCsvLine(line) {
   return tokens;
 }
 
-function repairTokens(tokens, warnings, rowNumber) {
+function repairTokens(
+  tokens: string[],
+  warnings: string[],
+  rowNumber: number,
+): string[] {
   if (tokens.length === DEFAULT_HEADERS.length) {
     return tokens;
   }
@@ -171,7 +181,7 @@ function repairTokens(tokens, warnings, rowNumber) {
   return [...fixedPrefix, bestSplit.gapAhead, bestSplit.gapLeader];
 }
 
-function scoreGapField(value) {
+function scoreGapField(value: string): number {
   const normalized = value.toLowerCase();
   let score = 0;
 
@@ -194,23 +204,23 @@ function scoreGapField(value) {
   return score;
 }
 
-function looksLikeHeader(tokens) {
+function looksLikeHeader(tokens: string[]): boolean {
   const normalized = tokens.map((token) => normalizeHeaderCell(token));
   return normalized.some((token) =>
     Object.values(HEADER_ALIASES).some((aliases) => aliases.includes(token)),
   );
 }
 
-function normalizeHeaders(tokens) {
+function normalizeHeaders(tokens: string[]): string[] {
   return tokens.map((token) => normalizeHeaderCell(token));
 }
 
-function normalizeHeaderCell(value) {
+function normalizeHeaderCell(value: string): string {
   return value.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function buildFieldMap(headers) {
-  const mapping = {};
+function buildFieldMap(headers: string[]): Record<CsvHeader, number> {
+  const mapping = {} as Record<CsvHeader, number>;
   const usedIndices = new Set();
 
   // First pass: map headers to their correct columns

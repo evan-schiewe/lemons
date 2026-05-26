@@ -1,6 +1,7 @@
 import initSqlJs from 'sql.js';
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
-import { normalizeRaceData } from '../model/normalizeRaceData.js';
+import { normalizeRaceData } from '../model/normalizeRaceData';
+import type { DbRow, ParsedRaceRow, SqlParams } from '../types';
 import schemaSql from './schema.sql?raw';
 
 const DATABASE_FILE_NAME = 'lemons-race-viewer.sqlite';
@@ -10,7 +11,16 @@ const STORAGE_BUNDLE_VERSION_KEY = 'lemons-race-viewer-bundle-version';
 const STORAGE_SOURCE_BUNDLE = 'bundle';
 const STORAGE_SOURCE_CUSTOM = 'custom';
 
+type SqlJsStatic = Awaited<ReturnType<typeof initSqlJs>>;
+type SqlJsDatabase = InstanceType<SqlJsStatic['Database']>;
+type StorageMode = 'memory' | 'opfs-cache';
+
 export class SQLiteClient {
+  SQL: SqlJsStatic | null;
+  db: SqlJsDatabase | null;
+  storageMode: StorageMode;
+  didRefreshBundledDatabase: boolean;
+
   constructor() {
     this.SQL = null;
     this.db = null;
@@ -18,24 +28,25 @@ export class SQLiteClient {
     this.didRefreshBundledDatabase = false;
   }
 
-  async init() {
-    this.SQL = await initSqlJs({
+  async init(): Promise<this> {
+    const SQL = await initSqlJs({
       locateFile: () => sqlWasmUrl,
     });
+    this.SQL = SQL;
 
     const persistedBytes = await this.loadPersistedBytes();
     this.db = persistedBytes?.length
-      ? new this.SQL.Database(persistedBytes)
-      : new this.SQL.Database();
+      ? new SQL.Database(persistedBytes)
+      : new SQL.Database();
     this.db.run(schemaSql);
     this.applyMigrations(this.db);
     await this.persist();
     return this;
   }
 
-  applyMigrations(database) {
+  applyMigrations(database: SqlJsDatabase): void {
     // Existing persisted databases need explicit ALTERs for new columns.
-    const raceColumns = this.queryDatabase(
+    const raceColumns = this.queryDatabase<{ name: string }>(
       database,
       'PRAGMA table_info(races)',
     );
@@ -74,14 +85,18 @@ export class SQLiteClient {
     }
   }
 
-  queryDatabase(database, sql, params = []) {
+  queryDatabase<T extends DbRow = DbRow>(
+    database: SqlJsDatabase,
+    sql: string,
+    params: SqlParams = [],
+  ): T[] {
     const statement = database.prepare(sql);
 
     try {
       statement.bind(params);
-      const rows = [];
+      const rows: T[] = [];
       while (statement.step()) {
-        rows.push(statement.getAsObject());
+        rows.push(statement.getAsObject() as T);
       }
       return rows;
     } finally {
@@ -89,15 +104,18 @@ export class SQLiteClient {
     }
   }
 
-  query(sql, params = []) {
-    return this.queryDatabase(this.db, sql, params);
+  query<T extends DbRow = DbRow>(sql: string, params: SqlParams = []): T[] {
+    return this.queryDatabase<T>(this.requireDb(), sql, params);
   }
 
-  queryOne(sql, params = []) {
-    return this.query(sql, params)[0] ?? null;
+  queryOne<T extends DbRow = DbRow>(
+    sql: string,
+    params: SqlParams = [],
+  ): T | null {
+    return this.query<T>(sql, params)[0] ?? null;
   }
 
-  tableExists(database, tableName) {
+  tableExists(database: SqlJsDatabase, tableName: string): boolean {
     return (
       this.queryDatabase(
         database,
@@ -107,24 +125,24 @@ export class SQLiteClient {
     );
   }
 
-  countRows(database, tableName) {
-    const rows = this.queryDatabase(
+  countRows(database: SqlJsDatabase, tableName: string): number {
+    const rows = this.queryDatabase<{ count: number }>(
       database,
       `SELECT COUNT(*) AS count FROM ${tableName}`,
     );
     return Number(rows[0]?.count ?? 0);
   }
 
-  execute(sql, params = []) {
-    this.db.run(sql, params);
+  execute(sql: string, params: SqlParams = []): void {
+    this.requireDb().run(sql, params);
     this.markDatabaseAsCustom();
   }
 
-  executeMany(sql, rows) {
-    const statement = this.db.prepare(sql);
+  executeMany(sql: string, rows: SqlParams[]): void {
+    const statement = this.requireDb().prepare(sql);
 
     try {
-      rows.forEach((params) => {
+      rows.forEach((params: SqlParams) => {
         statement.run(params);
         statement.reset();
       });
@@ -137,11 +155,15 @@ export class SQLiteClient {
     }
   }
 
-  executeManyOnDatabase(database, sql, rows) {
+  executeManyOnDatabase(
+    database: SqlJsDatabase,
+    sql: string,
+    rows: SqlParams[],
+  ): void {
     const statement = database.prepare(sql);
 
     try {
-      rows.forEach((params) => {
+      rows.forEach((params: SqlParams) => {
         statement.run(params);
         statement.reset();
       });
@@ -150,8 +172,8 @@ export class SQLiteClient {
     }
   }
 
-  rebuildNormalizedLaps(database) {
-    const races = this.queryDatabase(
+  rebuildNormalizedLaps(database: SqlJsDatabase): void {
+    const races = this.queryDatabase<{ id: string }>(
       database,
       'SELECT id FROM races ORDER BY rowid',
     );
@@ -169,7 +191,7 @@ export class SQLiteClient {
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `;
 
-    const rebuiltRows = [];
+    const rebuiltRows: SqlParams[] = [];
 
     database.run('BEGIN');
 
@@ -177,7 +199,7 @@ export class SQLiteClient {
       database.run('DELETE FROM normalized_laps');
 
       races.forEach((race) => {
-        const rawRows = this.queryDatabase(
+        const rawRows = this.queryDatabase<DbRow>(
           database,
           `
                 SELECT id, race_id, row_index, csv_row_number, raw_line, raw_lap, raw_entry, raw_driver,
@@ -193,29 +215,29 @@ export class SQLiteClient {
           return;
         }
 
-        const parsedRows = rawRows.map((row, index) => ({
+        const parsedRows: ParsedRaceRow[] = rawRows.map((row, index) => ({
           rowIndex: index,
-          csvRowNumber: row.csv_row_number,
-          rawLine: row.raw_line,
+          csvRowNumber: Number(row.csv_row_number ?? 0),
+          rawLine: `${row.raw_line ?? ''}`,
           rawCells: [
-            row.raw_lap,
-            row.raw_entry,
-            row.raw_driver,
-            row.raw_lap_time,
-            row.raw_position,
-            row.raw_speed,
-            row.raw_gap_ahead,
-            row.raw_gap_leader,
+            `${row.raw_lap ?? ''}`,
+            `${row.raw_entry ?? ''}`,
+            `${row.raw_driver ?? ''}`,
+            `${row.raw_lap_time ?? ''}`,
+            `${row.raw_position ?? ''}`,
+            `${row.raw_speed ?? ''}`,
+            `${row.raw_gap_ahead ?? ''}`,
+            `${row.raw_gap_leader ?? ''}`,
           ],
           values: {
-            lap: row.raw_lap ?? '',
-            team_slot: row.raw_entry ?? '',
-            driver: row.raw_driver ?? '',
-            lap_time: row.raw_lap_time ?? '',
-            position: row.raw_position ?? '',
-            speed: row.raw_speed ?? '',
-            gap_ahead: row.raw_gap_ahead ?? '',
-            gap_leader: row.raw_gap_leader ?? '',
+            lap: `${row.raw_lap ?? ''}`,
+            team_slot: `${row.raw_entry ?? ''}`,
+            driver: `${row.raw_driver ?? ''}`,
+            lap_time: `${row.raw_lap_time ?? ''}`,
+            position: `${row.raw_position ?? ''}`,
+            speed: `${row.raw_speed ?? ''}`,
+            gap_ahead: `${row.raw_gap_ahead ?? ''}`,
+            gap_leader: `${row.raw_gap_leader ?? ''}`,
           },
         }));
 
@@ -226,7 +248,7 @@ export class SQLiteClient {
           rebuiltRows.push([
             crypto.randomUUID(),
             race.id,
-            sourceRow?.id ?? null,
+            typeof sourceRow?.id === 'string' ? sourceRow.id : null,
             `${race.id}:${lap.lapNumber}:${lap.driverName}:${lap.lapTimeText}`,
             lap.lapNumber,
             lap.driverName,
@@ -259,29 +281,31 @@ export class SQLiteClient {
     }
   }
 
-  transaction(work) {
-    this.db.run('BEGIN');
+  transaction<T>(work: () => T): T {
+    const database = this.requireDb();
+    database.run('BEGIN');
     try {
       const result = work();
-      this.db.run('COMMIT');
+      database.run('COMMIT');
       this.markDatabaseAsCustom();
       return result;
     } catch (error) {
-      this.db.run('ROLLBACK');
+      database.run('ROLLBACK');
       throw error;
     }
   }
 
-  exportDatabase() {
-    return this.db.export();
+  exportDatabase(): Uint8Array {
+    return this.requireDb().export();
   }
 
-  async restoreDatabase(bytes) {
+  async restoreDatabase(bytes: ArrayLike<number>): Promise<void> {
     const incoming = new Uint8Array(bytes);
-    let restoredDatabase = null;
+    let restoredDatabase: SqlJsDatabase | null = null;
+    const SQL = this.requireSql();
 
     try {
-      restoredDatabase = new this.SQL.Database(incoming);
+      restoredDatabase = new SQL.Database(incoming);
 
       const hasRacesTable = this.tableExists(restoredDatabase, 'races');
       const hasRawLapRowsTable = this.tableExists(
@@ -326,8 +350,8 @@ export class SQLiteClient {
     }
   }
 
-  async persist() {
-    const bytes = this.db.export();
+  async persist(): Promise<void> {
+    const bytes = this.requireDb().export();
 
     if (await this.writeToOpfs(bytes)) {
       this.storageMode = 'opfs-cache';
@@ -337,7 +361,7 @@ export class SQLiteClient {
     this.storageMode = 'memory';
   }
 
-  async loadPersistedBytes() {
+  async loadPersistedBytes(): Promise<Uint8Array | null> {
     this.didRefreshBundledDatabase = false;
 
     const bundledVersion = await this.fetchBundledVersion();
@@ -382,7 +406,7 @@ export class SQLiteClient {
     return null;
   }
 
-  async clearPersistedData() {
+  async clearPersistedData(): Promise<void> {
     await this.deleteFromOpfs();
 
     try {
@@ -393,13 +417,14 @@ export class SQLiteClient {
       // Ignore storage access failures while clearing data.
     }
 
-    this.db = new this.SQL.Database();
+    const SQL = this.requireSql();
+    this.db = new SQL.Database();
     this.db.run(schemaSql);
     this.applyMigrations(this.db);
     this.storageMode = 'memory';
   }
 
-  async readFromOpfs() {
+  async readFromOpfs(): Promise<Uint8Array | null> {
     if (
       !('storage' in navigator) ||
       typeof navigator.storage.getDirectory !== 'function'
@@ -418,7 +443,7 @@ export class SQLiteClient {
     }
   }
 
-  async writeToOpfs(bytes) {
+  async writeToOpfs(bytes: Uint8Array): Promise<boolean> {
     if (
       !('storage' in navigator) ||
       typeof navigator.storage.getDirectory !== 'function'
@@ -433,7 +458,9 @@ export class SQLiteClient {
         create: true,
       });
       const writable = await handle.createWritable();
-      await writable.write(bytes);
+      const buffer = new ArrayBuffer(bytes.byteLength);
+      new Uint8Array(buffer).set(bytes);
+      await writable.write(buffer);
       await writable.close();
       return true;
     } catch {
@@ -441,7 +468,7 @@ export class SQLiteClient {
     }
   }
 
-  async deleteFromOpfs() {
+  async deleteFromOpfs(): Promise<void> {
     if (
       !('storage' in navigator) ||
       typeof navigator.storage.getDirectory !== 'function'
@@ -457,7 +484,7 @@ export class SQLiteClient {
     }
   }
 
-  markDatabaseAsCustom() {
+  markDatabaseAsCustom(): void {
     try {
       localStorage.setItem(STORAGE_SOURCE_KEY, STORAGE_SOURCE_CUSTOM);
     } catch {
@@ -465,7 +492,7 @@ export class SQLiteClient {
     }
   }
 
-  recordBundleSeed(version) {
+  recordBundleSeed(version: string | null): void {
     try {
       localStorage.setItem(STORAGE_SOURCE_KEY, STORAGE_SOURCE_BUNDLE);
       if (version) {
@@ -478,7 +505,7 @@ export class SQLiteClient {
     }
   }
 
-  getStorageSource() {
+  getStorageSource(): string {
     try {
       return localStorage.getItem(STORAGE_SOURCE_KEY) || STORAGE_SOURCE_BUNDLE;
     } catch {
@@ -486,7 +513,7 @@ export class SQLiteClient {
     }
   }
 
-  getStoredBundleVersion() {
+  getStoredBundleVersion(): string | null {
     try {
       return localStorage.getItem(STORAGE_BUNDLE_VERSION_KEY);
     } catch {
@@ -494,7 +521,7 @@ export class SQLiteClient {
     }
   }
 
-  resolveBundleVersion(headers) {
+  resolveBundleVersion(headers: Headers): string | null {
     const etag = headers.get('etag');
     if (etag) {
       return `etag:${etag}`;
@@ -509,7 +536,7 @@ export class SQLiteClient {
     return null;
   }
 
-  async fetchBundledVersion() {
+  async fetchBundledVersion(): Promise<string | null> {
     try {
       const response = await fetch(DEFAULT_DATABASE_URL, {
         method: 'HEAD',
@@ -524,5 +551,21 @@ export class SQLiteClient {
     } catch {
       return null;
     }
+  }
+
+  private requireDb(): SqlJsDatabase {
+    if (!this.db) {
+      throw new Error('SQLite database has not been initialized.');
+    }
+
+    return this.db;
+  }
+
+  private requireSql(): SqlJsStatic {
+    if (!this.SQL) {
+      throw new Error('SQLite runtime has not been initialized.');
+    }
+
+    return this.SQL;
   }
 }

@@ -14,7 +14,7 @@ export default defineConfig({
 
           if (
             id.includes('/src/features/charts/') ||
-            id.includes('/src/features/dashboard/summaryCards.js')
+            id.includes('/src/features/dashboard/summaryCards.ts')
           ) {
             return 'feature-charts';
           }

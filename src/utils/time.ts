@@ -1,6 +1,9 @@
-export function computeMedian(values) {
+export function computeMedian(
+  values: Array<number | null | undefined>,
+): number | null {
   const sorted = values
     .filter((value) => Number.isFinite(value))
+    .map((value) => Number(value))
     .slice()
     .sort((left, right) => left - right);
 
@@ -14,7 +17,9 @@ export function computeMedian(values) {
     : sorted[midpoint];
 }
 
-export function parseDurationLike(value) {
+import type { ParsedDuration } from '../types';
+
+export function parseDurationLike(value: unknown): ParsedDuration {
   const raw = `${value ?? ''}`.trim();
 
   if (!raw) {
@@ -58,7 +63,7 @@ export function parseDurationLike(value) {
   return { raw, ms: null, laps: null, kind: 'text' };
 }
 
-function parseClockish(value) {
+function parseClockish(value: unknown): number | null {
   const trimmed = `${value ?? ''}`.trim().toLowerCase();
 
   if (!trimmed || trimmed === 'leader' || trimmed === '-') {
@@ -94,8 +99,11 @@ function parseClockish(value) {
   return Number.isFinite(numeric) ? Math.round(numeric * 1000) : null;
 }
 
-export function formatDurationMs(milliseconds, fallback = '-') {
-  if (!Number.isFinite(milliseconds)) {
+export function formatDurationMs(
+  milliseconds: number | null | undefined,
+  fallback = '-',
+): string {
+  if (typeof milliseconds !== 'number' || !Number.isFinite(milliseconds)) {
     return fallback;
   }
 
@@ -117,8 +125,11 @@ export function formatDurationMs(milliseconds, fallback = '-') {
  * Does not render hours if lap time is under 1 hour
  * Examples: "01:23" for 1:23, "01:23:45" for 1+ hour laps
  */
-export function formatLapTimeHHMMSS(milliseconds, fallback = '—') {
-  if (!Number.isFinite(milliseconds)) {
+export function formatLapTimeHHMMSS(
+  milliseconds: number | null | undefined,
+  fallback = '—',
+): string {
+  if (typeof milliseconds !== 'number' || !Number.isFinite(milliseconds)) {
     return fallback;
   }
 
@@ -133,24 +144,36 @@ export function formatLapTimeHHMMSS(milliseconds, fallback = '—') {
   return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
 }
 
-export function formatGapDisplay(milliseconds, laps, fallbackText = '-') {
-  if (Number.isFinite(laps) && laps !== 0) {
-    if (Number.isFinite(milliseconds) && milliseconds > 0) {
+export function formatGapDisplay(
+  milliseconds: number | null | undefined,
+  laps: number | null | undefined,
+  fallbackText = '-',
+): string {
+  if (typeof laps === 'number' && Number.isFinite(laps) && laps !== 0) {
+    if (
+      typeof milliseconds === 'number' &&
+      Number.isFinite(milliseconds) &&
+      milliseconds > 0
+    ) {
       return `${laps} lap${Math.abs(laps) === 1 ? '' : 's'}, ${formatDurationMs(milliseconds)}`;
     }
 
     return `${laps} lap${Math.abs(laps) === 1 ? '' : 's'}`;
   }
 
-  if (Number.isFinite(milliseconds)) {
+  if (typeof milliseconds === 'number' && Number.isFinite(milliseconds)) {
     return formatDurationMs(milliseconds);
   }
 
   return fallbackText;
 }
 
-export function formatWallClock(startIso, offsetMs, fallback = '-') {
-  if (!startIso || !Number.isFinite(offsetMs)) {
+export function formatWallClock(
+  startIso: string | null | undefined,
+  offsetMs: number | null | undefined,
+  fallback = '-',
+): string {
+  if (!startIso || typeof offsetMs !== 'number' || !Number.isFinite(offsetMs)) {
     return fallback;
   }
 

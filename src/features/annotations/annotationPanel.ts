@@ -1,5 +1,73 @@
-import { escapeHtml, formatNumber, formatSpeed } from '../../utils/format.js';
-import { formatDurationMs, formatWallClock } from '../../utils/time.js';
+import type {
+  AnnotationHandlers,
+  AnnotationPayload,
+  DriverStint,
+  LapRow,
+  PanelAnnotationKind,
+  RaceAnnotations,
+  RangeEvent,
+  TaggedIncident,
+} from '../../types';
+import { closestElement } from '../../utils/dom';
+import { escapeHtml, formatNumber, formatSpeed } from '../../utils/format';
+import { formatDurationMs, formatWallClock } from '../../utils/time';
+
+interface KindConfig {
+  formId: string;
+  title: string;
+  listKey: keyof Pick<
+    RaceAnnotations,
+    'taggedIncidents' | 'rangeEvents' | 'driverStints'
+  >;
+  timingLabel: string;
+}
+
+interface AnnotationPanelViewModel {
+  selectedLapRow: LapRow | null;
+  rows: LapRow[];
+  raceStartTime: string | null;
+  annotations: RaceAnnotations;
+}
+
+interface ActiveEdit {
+  kind: PanelAnnotationKind;
+  id: string;
+}
+
+type PanelItem = TaggedIncident | RangeEvent | DriverStint;
+
+interface SelectedLapDetails {
+  flags: string[];
+  lapNotes: RaceAnnotations['lapNotes'];
+  taggedIncidents: TaggedIncident[];
+  rangeEvents: RangeEvent[];
+  driverStints: DriverStint[];
+}
+
+interface AnnotationPanelState {
+  viewModel: AnnotationPanelViewModel;
+  activeEdit: ActiveEdit | null;
+  activeKind: PanelAnnotationKind;
+  isModalOpen: boolean;
+  modalView: 'form' | 'lapDetails';
+  modalRoot: HTMLDivElement;
+  prefillValues: AnnotationPayload | null;
+}
+
+const EMPTY_ANNOTATIONS: RaceAnnotations = {
+  lapNotes: [],
+  taggedIncidents: [],
+  rangeEvents: [],
+  driverStints: [],
+  journalEntries: [],
+};
+
+const EMPTY_VIEW_MODEL: AnnotationPanelViewModel = {
+  selectedLapRow: null,
+  rows: [],
+  raceStartTime: null,
+  annotations: EMPTY_ANNOTATIONS,
+};
 
 const KIND_CONFIG = {
   taggedIncident: {
@@ -20,14 +88,14 @@ const KIND_CONFIG = {
     listKey: 'driverStints',
     timingLabel: 'Driver span across laps',
   },
-};
+} satisfies Record<PanelAnnotationKind, KindConfig>;
 
-const DEFAULT_KIND = 'taggedIncident';
+const DEFAULT_KIND: PanelAnnotationKind = 'taggedIncident';
 
 /**
  * Find the selected lap and its neighbors (lap before and lap after)
  */
-function getContextLaps(rows, selectedLapRow) {
+function getContextLaps(rows: LapRow[], selectedLapRow: LapRow | null) {
   if (!selectedLapRow || !rows?.length) {
     return { before: null, current: selectedLapRow, after: null };
   }
@@ -47,7 +115,11 @@ function getContextLaps(rows, selectedLapRow) {
 /**
  * Render a mini table row for lap context
  */
-function renderContextLapRow(row, label, raceStartTimeIso) {
+function renderContextLapRow(
+  row: LapRow,
+  label: string,
+  raceStartTimeIso: string | null,
+): string {
   const hasPitTag = Boolean(row.is_pit_lap);
   const hasIncidentTag = Number(row.incident_count) > 0;
   const flags = [
@@ -74,7 +146,11 @@ function renderContextLapRow(row, label, raceStartTimeIso) {
 /**
  * Render the mini lap context table
  */
-function renderContextTable(rows, selectedLapRow, raceStartTimeIso) {
+function renderContextTable(
+  rows: LapRow[],
+  selectedLapRow: LapRow | null,
+  raceStartTimeIso: string | null,
+): string {
   const context = getContextLaps(rows, selectedLapRow);
 
   let html = `
@@ -125,13 +201,16 @@ function renderContextTable(rows, selectedLapRow, raceStartTimeIso) {
   return html;
 }
 
-export function mountAnnotationPanel(container, handlers) {
+export function mountAnnotationPanel(
+  container: HTMLElement,
+  handlers: AnnotationHandlers,
+) {
   const modalRoot = document.createElement('div');
   modalRoot.className = 'annotation-modal-root';
   document.body.appendChild(modalRoot);
 
-  const state = {
-    viewModel: null,
+  const state: AnnotationPanelState = {
+    viewModel: EMPTY_VIEW_MODEL,
     activeEdit: null,
     activeKind: DEFAULT_KIND,
     isModalOpen: false,
@@ -140,15 +219,21 @@ export function mountAnnotationPanel(container, handlers) {
     prefillValues: null,
   };
 
-  async function handleSubmit(event) {
+  async function handleSubmit(event: SubmitEvent) {
     event.preventDefault();
-    const form = event.target.closest('form[data-kind]');
+    const form = closestElement<HTMLFormElement>(
+      event.target,
+      'form[data-kind]',
+    );
     if (!form) {
       return;
     }
 
     const formData = new FormData(form);
-    const kind = form.dataset.kind;
+    const kind = readPanelKind(form.dataset.kind);
+    if (!kind) {
+      return;
+    }
     const didSave = await handlers.onSave(
       kind,
       normalizeFormData(kind, formData),
@@ -161,14 +246,16 @@ export function mountAnnotationPanel(container, handlers) {
     }
   }
 
-  function handleChange(event) {
-    const selector = event.target.closest('[data-action="switch-kind"]');
+  function handleChange(event: Event) {
+    const selector = closestElement<HTMLSelectElement>(
+      event.target,
+      '[data-action="switch-kind"]',
+    );
     if (!selector) {
       return;
     }
 
-    state.activeKind =
-      selector.value in KIND_CONFIG ? selector.value : DEFAULT_KIND;
+    state.activeKind = readPanelKind(selector.value) ?? DEFAULT_KIND;
     state.activeEdit = null;
     renderCurrentPanel(container, state);
     hydrateActiveForm(
@@ -180,12 +267,13 @@ export function mountAnnotationPanel(container, handlers) {
     );
   }
 
-  function handleLapNumberChange(event) {
+  function handleLapNumberChange(event: Event) {
     if (state.modalView !== 'form') {
       return;
     }
 
-    const input = event.target.closest(
+    const input = closestElement<HTMLInputElement>(
+      event.target,
       'input[name="lap_number"], input[name="start_lap"], input[name="end_lap"]',
     );
     if (!input || !state.viewModel?.rows) {
@@ -220,17 +308,23 @@ export function mountAnnotationPanel(container, handlers) {
     }
   }
 
-  async function handleClick(event) {
-    const button = event.target.closest('button[data-action]');
+  async function handleClick(event: MouseEvent) {
+    const button = closestElement<HTMLButtonElement>(
+      event.target,
+      'button[data-action]',
+    );
     if (!button) {
       return;
     }
 
     const action = button.dataset.action;
-    const kind = button.dataset.kind;
+    const kind = readPanelKind(button.dataset.kind);
 
-    if (action === 'delete') {
-      await handlers.onDelete(kind, button.dataset.id);
+    if (action === 'delete' && kind) {
+      const id = button.dataset.id;
+      if (id) {
+        await handlers.onDelete(kind, id);
+      }
       return;
     }
 
@@ -239,10 +333,7 @@ export function mountAnnotationPanel(container, handlers) {
       state.modalView = 'form';
       state.activeEdit = null;
       state.prefillValues = null;
-      state.activeKind =
-        button.dataset.kind in KIND_CONFIG
-          ? button.dataset.kind
-          : state.activeKind;
+      state.activeKind = kind ?? state.activeKind;
       renderCurrentPanel(container, state);
       hydrateActiveForm(
         state.modalRoot,
@@ -263,9 +354,10 @@ export function mountAnnotationPanel(container, handlers) {
       return;
     }
 
-    if (action === 'edit') {
-      const item = findItem(state.viewModel, kind, button.dataset.id);
-      state.activeEdit = item ? { kind, id: button.dataset.id } : null;
+    if (action === 'edit' && kind) {
+      const id = button.dataset.id;
+      const item = findItem(state.viewModel, kind, id);
+      state.activeEdit = item && id ? { kind, id } : null;
       state.activeKind = kind;
       state.isModalOpen = true;
       state.modalView = 'form';
@@ -275,7 +367,7 @@ export function mountAnnotationPanel(container, handlers) {
       return;
     }
 
-    if (action === 'clear') {
+    if (action === 'clear' && kind) {
       state.activeEdit = null;
       state.isModalOpen = false;
       state.modalView = 'form';
@@ -292,11 +384,11 @@ export function mountAnnotationPanel(container, handlers) {
   state.modalRoot.addEventListener('submit', handleSubmit);
 
   return {
-    render(viewModel) {
-      state.viewModel = viewModel;
+    render(viewModel: AnnotationPanelViewModel | null) {
+      state.viewModel = normalizePanelViewModel(viewModel);
       if (state.activeEdit?.kind) {
         const nextItem = findItem(
-          viewModel,
+          state.viewModel,
           state.activeEdit.kind,
           state.activeEdit.id,
         );
@@ -308,18 +400,25 @@ export function mountAnnotationPanel(container, handlers) {
       if (state.isModalOpen && state.modalView === 'form') {
         hydrateActiveForm(
           state.modalRoot,
-          viewModel,
+          state.viewModel,
           state.activeKind,
           state.activeEdit
-            ? findItem(viewModel, state.activeEdit.kind, state.activeEdit.id)
+            ? findItem(
+                state.viewModel,
+                state.activeEdit.kind,
+                state.activeEdit.id,
+              )
             : null,
           state.prefillValues,
           false,
         );
       }
     },
-    openComposer(kind = DEFAULT_KIND, options = {}) {
-      state.activeKind = kind in KIND_CONFIG ? kind : DEFAULT_KIND;
+    openComposer(
+      kind: string = DEFAULT_KIND,
+      options: { prefill?: AnnotationPayload } = {},
+    ) {
+      state.activeKind = readPanelKind(kind) ?? DEFAULT_KIND;
       state.activeEdit = null;
       state.isModalOpen = true;
       state.modalView = 'form';
@@ -333,22 +432,26 @@ export function mountAnnotationPanel(container, handlers) {
         state.prefillValues,
       );
     },
-    openEditor(kind, id) {
-      const item = findItem(state.viewModel, kind, id);
+    openEditor(kind: string, id: string) {
+      const panelKind = readPanelKind(kind);
+      if (!panelKind) {
+        return;
+      }
+      const item = findItem(state.viewModel, panelKind, id);
       if (!item) {
         return;
       }
 
-      state.activeKind = kind;
-      state.activeEdit = { kind, id };
+      state.activeKind = panelKind;
+      state.activeEdit = { kind: panelKind, id };
       state.isModalOpen = true;
       state.modalView = 'form';
       state.prefillValues = null;
       renderCurrentPanel(container, state);
-      hydrateActiveForm(state.modalRoot, state.viewModel, kind, item);
+      hydrateActiveForm(state.modalRoot, state.viewModel, panelKind, item);
     },
-    openLapDetails(viewModel) {
-      const safeViewModel = {
+    openLapDetails(viewModel: Partial<AnnotationPanelViewModel> | null) {
+      const safeViewModel: AnnotationPanelViewModel = {
         selectedLapRow: viewModel?.selectedLapRow ?? null,
         rows: viewModel?.rows ?? [],
         raceStartTime: viewModel?.raceStartTime ?? null,
@@ -357,6 +460,7 @@ export function mountAnnotationPanel(container, handlers) {
           taggedIncidents: viewModel?.annotations?.taggedIncidents ?? [],
           rangeEvents: viewModel?.annotations?.rangeEvents ?? [],
           driverStints: viewModel?.annotations?.driverStints ?? [],
+          journalEntries: viewModel?.annotations?.journalEntries ?? [],
         },
       };
 
@@ -370,7 +474,10 @@ export function mountAnnotationPanel(container, handlers) {
   };
 }
 
-function renderCurrentPanel(container, state) {
+function renderCurrentPanel(
+  container: HTMLElement,
+  state: AnnotationPanelState,
+): void {
   container.innerHTML = renderPanel(state.viewModel, state.activeEdit);
   state.modalRoot.innerHTML = state.isModalOpen
     ? renderModal(
@@ -383,7 +490,10 @@ function renderCurrentPanel(container, state) {
   document.body.classList.toggle('annotation-modal-open', state.isModalOpen);
 }
 
-function renderPanel(viewModel, activeEdit) {
+function renderPanel(
+  viewModel: AnnotationPanelViewModel,
+  activeEdit: ActiveEdit | null,
+): string {
   const selected = viewModel.selectedLapRow;
   const annotationCount =
     viewModel.annotations.taggedIncidents.length +
@@ -408,7 +518,10 @@ function renderPanel(viewModel, activeEdit) {
   `;
 }
 
-function buildSelectedLapDetails(selected, annotations) {
+function buildSelectedLapDetails(
+  selected: LapRow,
+  annotations: RaceAnnotations,
+): SelectedLapDetails {
   const hasPitTag = Boolean(selected.is_pit_lap);
   const hasIncidentTag = Number(selected.incident_count) > 0;
 
@@ -422,7 +535,7 @@ function buildSelectedLapDetails(selected, annotations) {
     selected.incident_count
       ? `${selected.incident_count} Incident${selected.incident_count === 1 ? '' : 's'}`
       : null,
-  ].filter(Boolean);
+  ].filter((flag): flag is string => Boolean(flag));
 
   const lapNumber = selected.lap_number;
   return {
@@ -442,7 +555,12 @@ function buildSelectedLapDetails(selected, annotations) {
   };
 }
 
-function renderSelectedLapList(title, items, renderItem, renderActions = null) {
+function renderSelectedLapList<T>(
+  title: string,
+  items: T[],
+  renderItem: (item: T) => string,
+  renderActions: ((item: T) => string) | null = null,
+): string {
   return `
     <section class="selected-lap-list">
       <h4>${escapeHtml(title)}</h4>
@@ -451,7 +569,7 @@ function renderSelectedLapList(title, items, renderItem, renderActions = null) {
   `;
 }
 
-function renderSelectedLapTaggedIncidentActions(item) {
+function renderSelectedLapTaggedIncidentActions(item: TaggedIncident): string {
   return `
     <div class="selected-lap-item-actions">
       <button class="button ghost" data-action="edit" data-kind="taggedIncident" data-id="${item.id}" type="button">Edit</button>
@@ -459,7 +577,12 @@ function renderSelectedLapTaggedIncidentActions(item) {
   `;
 }
 
-function renderModal(viewModel, activeEdit, activeKind, modalView = 'form') {
+function renderModal(
+  viewModel: AnnotationPanelViewModel,
+  activeEdit: ActiveEdit | null,
+  activeKind: PanelAnnotationKind,
+  modalView: AnnotationPanelState['modalView'] = 'form',
+): string {
   if (modalView === 'lapDetails') {
     return renderLapDetailsModal(viewModel);
   }
@@ -486,7 +609,7 @@ function renderModal(viewModel, activeEdit, activeKind, modalView = 'form') {
   `;
 }
 
-function renderLapDetailsModal(viewModel) {
+function renderLapDetailsModal(viewModel: AnnotationPanelViewModel): string {
   const selected = viewModel?.selectedLapRow;
   const details = selected
     ? buildSelectedLapDetails(selected, viewModel.annotations)
@@ -528,7 +651,7 @@ function renderLapDetailsModal(viewModel) {
   `;
 }
 
-function renderFormSwitcher(activeKind) {
+function renderFormSwitcher(activeKind: PanelAnnotationKind): string {
   return `
     <section class="annotation-section annotation-form-switcher">
       <label>
@@ -547,7 +670,11 @@ function renderFormSwitcher(activeKind) {
   `;
 }
 
-function renderActiveForm(selected, activeEdit, activeKind) {
+function renderActiveForm(
+  selected: LapRow | null,
+  activeEdit: ActiveEdit | null,
+  activeKind: PanelAnnotationKind,
+): string {
   if (activeKind === 'rangeEvent') {
     return renderRangeEventForm(selected, activeEdit);
   }
@@ -559,7 +686,10 @@ function renderActiveForm(selected, activeEdit, activeKind) {
   return renderIncidentForm(selected, activeEdit);
 }
 
-function renderIncidentForm(selected, activeEdit) {
+function renderIncidentForm(
+  selected: LapRow | null,
+  activeEdit: ActiveEdit | null,
+): string {
   const isEditing = activeEdit?.kind === 'taggedIncident';
   return `
     <section class="annotation-section ${isEditing ? 'annotation-section-editing' : ''}">
@@ -580,7 +710,10 @@ function renderIncidentForm(selected, activeEdit) {
   `;
 }
 
-function renderRangeEventForm(selected, activeEdit) {
+function renderRangeEventForm(
+  selected: LapRow | null,
+  activeEdit: ActiveEdit | null,
+): string {
   const isEditing = activeEdit?.kind === 'rangeEvent';
   return `
     <section class="annotation-section ${isEditing ? 'annotation-section-editing' : ''}">
@@ -602,7 +735,10 @@ function renderRangeEventForm(selected, activeEdit) {
   `;
 }
 
-function renderDriverStintForm(selected, activeEdit) {
+function renderDriverStintForm(
+  selected: LapRow | null,
+  activeEdit: ActiveEdit | null,
+): string {
   const isEditing = activeEdit?.kind === 'driverStint';
   return `
     <section class="annotation-section ${isEditing ? 'annotation-section-editing' : ''}">
@@ -623,7 +759,12 @@ function renderDriverStintForm(selected, activeEdit) {
   `;
 }
 
-function renderListSection(title, kind, items, renderItem) {
+function renderListSection<T extends PanelItem>(
+  title: string,
+  kind: PanelAnnotationKind,
+  items: T[],
+  renderItem: (item: T, kind: PanelAnnotationKind) => string,
+): string {
   return `
     <section class="annotation-section">
       <div class="panel-header">
@@ -637,7 +778,10 @@ function renderListSection(title, kind, items, renderItem) {
   `;
 }
 
-function renderTaggedIncidentItem(item, kind) {
+function renderTaggedIncidentItem(
+  item: TaggedIncident,
+  kind: PanelAnnotationKind,
+): string {
   return `
     <article class="annotation-item">
       <strong>Lap ${escapeHtml(item.lap_number)} · ${escapeHtml(item.tag)}</strong>
@@ -648,7 +792,10 @@ function renderTaggedIncidentItem(item, kind) {
   `;
 }
 
-function renderRangeEventItem(item, kind) {
+function renderRangeEventItem(
+  item: RangeEvent,
+  kind: PanelAnnotationKind,
+): string {
   return `
     <article class="annotation-item">
       <strong>Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)} · ${escapeHtml(item.tag)}</strong>
@@ -659,7 +806,10 @@ function renderRangeEventItem(item, kind) {
   `;
 }
 
-function renderDriverStintItem(item, kind) {
+function renderDriverStintItem(
+  item: DriverStint,
+  kind: PanelAnnotationKind,
+): string {
   return `
     <article class="annotation-item">
       <strong>${escapeHtml(item.driver_name)} · Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)}</strong>
@@ -669,7 +819,7 @@ function renderDriverStintItem(item, kind) {
   `;
 }
 
-function renderItemActions(kind, id) {
+function renderItemActions(kind: PanelAnnotationKind, id: string): string {
   return `
     <div class="form-actions">
       <button class="button ghost" data-action="edit" data-kind="${kind}" data-id="${id}" type="button">Edit</button>
@@ -678,8 +828,11 @@ function renderItemActions(kind, id) {
   `;
 }
 
-function normalizeFormData(kind, formData) {
-  const common = Object.fromEntries(formData.entries());
+function normalizeFormData(
+  kind: PanelAnnotationKind,
+  formData: FormData,
+): AnnotationPayload {
+  const common: AnnotationPayload = Object.fromEntries(formData.entries());
   const numericFields =
     {
       taggedIncident: ['lap_number'],
@@ -688,7 +841,7 @@ function normalizeFormData(kind, formData) {
     }[kind] || [];
 
   numericFields.forEach((field) => {
-    common[field] = Number.parseInt(common[field], 10);
+    common[field] = Number.parseInt(`${common[field] ?? ''}`, 10);
   });
 
   Object.keys(common).forEach((field) => {
@@ -704,16 +857,26 @@ function normalizeFormData(kind, formData) {
   return common;
 }
 
-function findItem(viewModel, kind, id) {
-  if (!viewModel) {
+function findItem(
+  viewModel: AnnotationPanelViewModel,
+  kind: PanelAnnotationKind | null | undefined,
+  id: string | null | undefined,
+): PanelItem | null {
+  if (!viewModel || !kind || !id) {
     return null;
   }
 
   const listKey = KIND_CONFIG[kind].listKey;
-  return viewModel.annotations[listKey].find((item) => item.id === id) ?? null;
+  const items = viewModel.annotations[listKey] as PanelItem[];
+  return items.find((item) => item.id === id) ?? null;
 }
 
-function hydrateForm(form, item, selectedLapRow, prefillValues = null) {
+function hydrateForm(
+  form: HTMLFormElement | null,
+  item: PanelItem | null,
+  selectedLapRow: LapRow | null,
+  prefillValues: AnnotationPayload | null = null,
+): void {
   if (!form) {
     return;
   }
@@ -726,13 +889,20 @@ function hydrateForm(form, item, selectedLapRow, prefillValues = null) {
   };
   Object.entries(defaults).forEach(([key, value]) => {
     const field = form.elements.namedItem(key);
-    if (field) {
-      field.value = value ?? '';
+    if (
+      field instanceof HTMLInputElement ||
+      field instanceof HTMLTextAreaElement ||
+      field instanceof HTMLSelectElement
+    ) {
+      field.value = `${value ?? ''}`;
     }
   });
 }
 
-function buildDefaultValues(kind, selectedLapRow) {
+function buildDefaultValues(
+  kind: string | undefined,
+  selectedLapRow: LapRow | null,
+): AnnotationPayload {
   if (!selectedLapRow) {
     return {};
   }
@@ -746,41 +916,83 @@ function buildDefaultValues(kind, selectedLapRow) {
       taggedIncident: '#d94f2b',
       rangeEvent: '#2563eb',
       driverStint: '#059669',
-    }[kind],
+    }[readPanelKind(kind) ?? DEFAULT_KIND],
   };
 }
 
-function focusAndRevealForm(form) {
+function focusAndRevealForm(form: HTMLFormElement | null): void {
   if (!form) {
     return;
   }
 
   form.scrollIntoView({ behavior: 'smooth', block: 'start' });
 
-  const firstEditableField = Array.from(form.elements).find((field) => {
-    return (
-      field instanceof HTMLElement &&
-      !field.disabled &&
-      field.type !== 'hidden' &&
-      typeof field.focus === 'function'
-    );
-  });
+  const firstEditableField = Array.from(form.elements).find(
+    (
+      field,
+    ): field is
+      | HTMLInputElement
+      | HTMLTextAreaElement
+      | HTMLSelectElement
+      | HTMLButtonElement => {
+      return (
+        (field instanceof HTMLInputElement ||
+          field instanceof HTMLTextAreaElement ||
+          field instanceof HTMLSelectElement ||
+          field instanceof HTMLButtonElement) &&
+        !field.disabled &&
+        (!(field instanceof HTMLInputElement) || field.type !== 'hidden') &&
+        typeof field.focus === 'function'
+      );
+    },
+  );
 
   firstEditableField?.focus();
 }
 
 function hydrateActiveForm(
-  container,
-  viewModel,
-  kind,
-  item,
-  prefillValues = null,
+  container: ParentNode,
+  viewModel: AnnotationPanelViewModel,
+  kind: PanelAnnotationKind,
+  item: PanelItem | null,
+  prefillValues: AnnotationPayload | null = null,
   shouldFocus = true,
-) {
-  const form = container.querySelector(`form[data-kind="${kind}"]`);
+): void {
+  const form = container.querySelector<HTMLFormElement>(
+    `form[data-kind="${kind}"]`,
+  );
   hydrateForm(form, item, viewModel?.selectedLapRow, prefillValues);
 
   if (shouldFocus) {
     focusAndRevealForm(form);
   }
+}
+
+function normalizePanelViewModel(
+  viewModel: AnnotationPanelViewModel | null,
+): AnnotationPanelViewModel {
+  return {
+    selectedLapRow: viewModel?.selectedLapRow ?? null,
+    rows: viewModel?.rows ?? [],
+    raceStartTime: viewModel?.raceStartTime ?? null,
+    annotations: {
+      lapNotes: viewModel?.annotations?.lapNotes ?? [],
+      taggedIncidents: viewModel?.annotations?.taggedIncidents ?? [],
+      rangeEvents: viewModel?.annotations?.rangeEvents ?? [],
+      driverStints: viewModel?.annotations?.driverStints ?? [],
+      journalEntries: viewModel?.annotations?.journalEntries ?? [],
+    },
+  };
+}
+
+function readPanelKind(value: string | undefined): PanelAnnotationKind | null {
+  if (
+    value === 'taggedIncident' ||
+    value === 'rangeEvent' ||
+    value === 'driverStint'
+  ) {
+    return value;
+  }
+
+  return null;
 }

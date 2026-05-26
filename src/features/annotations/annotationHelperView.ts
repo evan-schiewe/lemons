@@ -1,5 +1,18 @@
-import { escapeHtml } from '../../utils/format.js';
-import { formatLapTimeHHMMSS, formatWallClock } from '../../utils/time.js';
+import type {
+  AnnotationHandlers,
+  AnnotationHelperHandle,
+  AnnotationHelperViewModel,
+  AnnotationKind,
+  AnnotationPayload,
+  CandidateLap,
+  LapNote,
+  RaceAnnotations,
+  RangeEvent,
+  TaggedIncident,
+} from '../../types';
+import { closestElement } from '../../utils/dom';
+import { escapeHtml } from '../../utils/format';
+import { formatLapTimeHHMMSS, formatWallClock } from '../../utils/time';
 
 /**
  * Annotation Helper View Controller
@@ -11,26 +24,52 @@ import { formatLapTimeHHMMSS, formatWallClock } from '../../utils/time.js';
  * - Auto-advance toggle and state persistence
  */
 
-export function mountAnnotationHelper(container, handlers) {
-  const state = { viewModel: null };
+interface AnnotationHelperHandlers extends AnnotationHandlers {
+  onOpenComposer?: (
+    kind: AnnotationKind,
+    options?: { prefill?: AnnotationPayload },
+  ) => void;
+  onOpenEditor?: (kind: AnnotationKind, id: string) => void;
+  onNavigate: (direction: 'prev' | 'next' | 'jump-unresolved') => void;
+  onToggleAutoAdvance: () => void;
+}
+
+interface AnnotationHelperState {
+  viewModel: AnnotationHelperViewModel | null;
+}
+
+export function mountAnnotationHelper(
+  container: HTMLElement,
+  handlers: AnnotationHelperHandlers,
+): AnnotationHelperHandle {
+  const state: AnnotationHelperState = { viewModel: null };
 
   // Delegation for button actions (delete, edit, quick actions)
-  container.addEventListener('click', async (event) => {
-    const button = event.target.closest('button[data-action]');
+  container.addEventListener('click', async (event: MouseEvent) => {
+    const button = closestElement<HTMLButtonElement>(
+      event.target,
+      'button[data-action]',
+    );
     if (!button) {
       return;
     }
 
     const action = button.dataset.action;
-    const kind = button.dataset.kind;
+    const kind = readAnnotationKind(button.dataset.kind);
 
-    if (action === 'delete') {
-      await handlers.onDelete(kind, button.dataset.id);
+    if (action === 'delete' && kind) {
+      const id = button.dataset.id;
+      if (id) {
+        await handlers.onDelete(kind, id);
+      }
       return;
     }
 
-    if (action === 'edit') {
-      handlers.onOpenEditor?.(kind, button.dataset.id);
+    if (action === 'edit' && kind) {
+      const id = button.dataset.id;
+      if (id) {
+        handlers.onOpenEditor?.(kind, id);
+      }
       return;
     }
 
@@ -109,7 +148,7 @@ export function mountAnnotationHelper(container, handlers) {
   });
 
   return {
-    render(viewModel) {
+    render(viewModel: AnnotationHelperViewModel | null) {
       state.viewModel = viewModel;
       if (!viewModel) {
         container.innerHTML = '<div class="helper-empty">No race loaded</div>';
@@ -121,7 +160,7 @@ export function mountAnnotationHelper(container, handlers) {
   };
 }
 
-function renderHelper(viewModel) {
+function renderHelper(viewModel: AnnotationHelperViewModel): string {
   const { candidates, currentIndex, annotations, autoAdvance, raceStartTime } =
     viewModel;
 
@@ -142,7 +181,13 @@ function renderHelper(viewModel) {
   `;
 }
 
-function renderQueueHeader(candidate, index, total, unreviewed, raceStartTime) {
+function renderQueueHeader(
+  candidate: CandidateLap,
+  index: number,
+  total: number,
+  unreviewed: number,
+  raceStartTime: string | null,
+): string {
   const statusClass = candidate.isReviewed
     ? 'helper-status-reviewed'
     : 'helper-status-unreviewed';
@@ -193,11 +238,11 @@ function renderQueueHeader(candidate, index, total, unreviewed, raceStartTime) {
 }
 
 function renderNavigationControls(
-  currentIndex,
-  total,
-  autoAdvance,
-  unreviewed,
-) {
+  currentIndex: number,
+  total: number,
+  autoAdvance: boolean,
+  unreviewed: number,
+): string {
   const canGoBack = currentIndex > 0;
   const canGoNext = currentIndex < total - 1;
   const hasUnreviewed = unreviewed > 0;
@@ -244,7 +289,7 @@ function renderNavigationControls(
   `;
 }
 
-function renderQuickActions() {
+function renderQuickActions(): string {
   return `
     <div class="helper-quick-actions">
       <button class="button secondary" data-action="quick-incident" type="button">
@@ -266,7 +311,10 @@ function renderQuickActions() {
   `;
 }
 
-function renderRelatedAnnotations(candidate, annotations) {
+function renderRelatedAnnotations(
+  candidate: CandidateLap,
+  annotations: RaceAnnotations,
+): string {
   const relatedNotes = annotations.lapNotes.filter(
     (n) => n.lap_number === candidate.lap_number,
   );
@@ -294,7 +342,12 @@ function renderRelatedAnnotations(candidate, annotations) {
   `;
 }
 
-function renderListSection(title, kind, items, renderItem) {
+function renderListSection<T extends { id: string }>(
+  title: string,
+  kind: AnnotationKind,
+  items: T[],
+  renderItem: (item: T, kind: AnnotationKind) => string,
+): string {
   return `
     <section class="helper-annotation-list-section">
       <h5>${escapeHtml(title)}</h5>
@@ -305,7 +358,7 @@ function renderListSection(title, kind, items, renderItem) {
   `;
 }
 
-function renderLapNoteItem(item, kind) {
+function renderLapNoteItem(item: LapNote, kind: AnnotationKind): string {
   return `
     <article class="helper-annotation-item">
       <strong>Lap ${escapeHtml(item.lap_number)}</strong>
@@ -316,7 +369,10 @@ function renderLapNoteItem(item, kind) {
   `;
 }
 
-function renderTaggedIncidentItem(item, kind) {
+function renderTaggedIncidentItem(
+  item: TaggedIncident,
+  kind: AnnotationKind,
+): string {
   return `
     <article class="helper-annotation-item">
       <strong>Lap ${escapeHtml(item.lap_number)} · ${escapeHtml(item.tag)}</strong>
@@ -327,7 +383,7 @@ function renderTaggedIncidentItem(item, kind) {
   `;
 }
 
-function renderRangeEventItem(item, kind) {
+function renderRangeEventItem(item: RangeEvent, kind: AnnotationKind): string {
   return `
     <article class="helper-annotation-item">
       <strong>Laps ${escapeHtml(item.start_lap)}–${escapeHtml(item.end_lap)}</strong>
@@ -338,11 +394,25 @@ function renderRangeEventItem(item, kind) {
   `;
 }
 
-function renderItemActions(kind, id) {
+function renderItemActions(kind: AnnotationKind, id: string): string {
   return `
     <div class="form-actions">
       <button class="button ghost" data-action="edit" data-kind="${kind}" data-id="${id}" type="button">Edit</button>
       <button class="button ghost" data-action="delete" data-kind="${kind}" data-id="${id}" type="button">Delete</button>
     </div>
   `;
+}
+
+function readAnnotationKind(value: string | undefined): AnnotationKind | null {
+  if (
+    value === 'lapNote' ||
+    value === 'taggedIncident' ||
+    value === 'rangeEvent' ||
+    value === 'driverStint' ||
+    value === 'journalEntry'
+  ) {
+    return value;
+  }
+
+  return null;
 }

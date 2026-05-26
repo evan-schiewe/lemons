@@ -1,11 +1,18 @@
-import { formatNumber } from '../utils/format.js';
+import type {
+  NormalizedLap,
+  NormalizedRaceData,
+  ParsedRaceRow,
+} from '../types';
+import { formatNumber } from '../utils/format';
 import {
   computeMedian,
   formatGapDisplay,
   parseDurationLike,
-} from '../utils/time.js';
+} from '../utils/time';
 
-export function normalizeRaceData(parsedRows) {
+export function normalizeRaceData(
+  parsedRows: ParsedRaceRow[],
+): NormalizedRaceData {
   const normalizedRows = parsedRows.map((row) => normalizeRow(row));
   const rollingMedians = buildRollingMedians(normalizedRows);
 
@@ -13,10 +20,13 @@ export function normalizeRaceData(parsedRows) {
     const rollingMedianMs = rollingMedians[index];
     const lapTimeMs = row.lapTime.ms;
     const isOutlier =
+      typeof lapTimeMs === 'number' &&
       Number.isFinite(lapTimeMs) &&
+      typeof rollingMedianMs === 'number' &&
       Number.isFinite(rollingMedianMs) &&
       lapTimeMs > rollingMedianMs * 1.3;
-    const isGreenFlag = Number.isFinite(lapTimeMs) && !isOutlier;
+    const isGreenFlag =
+      typeof lapTimeMs === 'number' && Number.isFinite(lapTimeMs) && !isOutlier;
 
     return {
       ...row,
@@ -42,7 +52,12 @@ export function normalizeRaceData(parsedRows) {
   };
 }
 
-function normalizeRow(row) {
+function normalizeRow(
+  row: ParsedRaceRow,
+): Omit<
+  NormalizedLap,
+  'rollingMedianMs' | 'isOutlier' | 'isGreenFlag' | 'searchText'
+> {
   const lapTime = parseDurationLike(row.values.lap_time);
   const gapAhead = parseDurationLike(row.values.gap_ahead);
   const gapLeader = parseDurationLike(row.values.gap_leader);
@@ -81,7 +96,9 @@ function normalizeRow(row) {
   };
 }
 
-function buildRollingMedians(rows) {
+function buildRollingMedians(
+  rows: Array<Pick<NormalizedLap, 'lapNumber' | 'lapTime'>>,
+): Array<number | null> {
   const medians = new Array(rows.length).fill(null);
   const ordered = rows
     .map((row, index) => ({ row, index }))
@@ -107,12 +124,12 @@ function buildRollingMedians(rows) {
   return medians;
 }
 
-function parseInteger(value) {
+function parseInteger(value: unknown): number {
   const parsed = Number.parseInt(`${value ?? ''}`.replace(/[^\d-]/g, ''), 10);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-function parseNumberLike(value) {
+function parseNumberLike(value: unknown): number | null {
   const parsed = Number.parseFloat(`${value ?? ''}`.replace(/[^\d.-]/g, ''));
   return Number.isFinite(parsed) ? parsed : null;
 }

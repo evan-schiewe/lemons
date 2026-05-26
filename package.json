@@ -7,11 +7,13 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "lint": "biome lint .",
-    "lint:write": "biome lint --write .",
+    "lint": "biome lint --write .",
+    "lint:check": "biome lint .",
     "format": "biome format --write .",
     "format:check": "biome format .",
-    "check": "biome check ."
+    "typecheck": "tsc --noEmit",
+    "check": "biome check . && tsc --noEmit",
+    "check:write": "biome check --write . && tsc --noEmit"
   },
   "dependencies": {
     "echarts": "6.1.0",
@@ -19,7 +21,9 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
+    "@types/sql.js": "1.4.11",
     "rollup-plugin-visualizer": "7.0.1",
+    "typescript": "6.0.3",
     "vite": "8.0.14"
   }
 }

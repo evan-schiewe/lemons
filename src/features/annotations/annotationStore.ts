@@ -1,3 +1,16 @@
+import type { SQLiteClient } from '../../db/sqliteClient';
+import type {
+  AnnotationKind,
+  AnnotationPayload,
+  AnnotationStore,
+  SqlValue,
+} from '../../types';
+
+interface AnnotationTableConfig {
+  table: string;
+  fields: string[];
+}
+
 const TABLE_CONFIG = {
   lapNote: {
     table: 'lap_notes',
@@ -65,15 +78,18 @@ const TABLE_CONFIG = {
       'updated_at',
     ],
   },
-};
+} satisfies Record<AnnotationKind, AnnotationTableConfig>;
 
-function ensurePositiveInteger(value, field) {
-  if (!Number.isInteger(value) || value < 1) {
+function ensurePositiveInteger(value: unknown, field: string): void {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
     throw new Error(`${field} must be a whole lap number greater than 0.`);
   }
 }
 
-function validateAnnotationPayload(kind, payload) {
+function validateAnnotationPayload(
+  kind: AnnotationKind,
+  payload: AnnotationPayload,
+): void {
   if (kind === 'taggedIncident' || kind === 'lapNote') {
     ensurePositiveInteger(payload.lap_number, 'Lap');
   }
@@ -82,14 +98,16 @@ function validateAnnotationPayload(kind, payload) {
     ensurePositiveInteger(payload.start_lap, 'Start lap');
     ensurePositiveInteger(payload.end_lap, 'End lap');
 
-    if (payload.end_lap < payload.start_lap) {
+    if (Number(payload.end_lap) < Number(payload.start_lap)) {
       throw new Error('End lap must be greater than or equal to start lap.');
     }
   }
 
   if (kind === 'journalEntry') {
     const hasLap =
-      Number.isInteger(payload.lap_number) && payload.lap_number > 0;
+      typeof payload.lap_number === 'number' &&
+      Number.isInteger(payload.lap_number) &&
+      payload.lap_number > 0;
     const hasEventTimeIso =
       typeof payload.event_time_iso === 'string' &&
       payload.event_time_iso.trim().length > 0;
@@ -106,6 +124,7 @@ function validateAnnotationPayload(kind, payload) {
 
     if (
       hasEventTimeIso &&
+      typeof payload.event_time_iso === 'string' &&
       Number.isNaN(new Date(payload.event_time_iso).getTime())
     ) {
       throw new Error('Journal timestamp must be a valid date/time.');
@@ -118,26 +137,39 @@ function validateAnnotationPayload(kind, payload) {
   }
 }
 
-export function createAnnotationStore(db) {
+function toSqlValue(value: unknown): SqlValue {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    value instanceof Uint8Array
+  ) {
+    return value;
+  }
+
+  return value == null ? null : `${value}`;
+}
+
+export function createAnnotationStore(db: SQLiteClient): AnnotationStore {
   return {
-    async save(kind, payload) {
+    async save(kind: AnnotationKind, payload: AnnotationPayload) {
       const config = TABLE_CONFIG[kind];
-      if (!config) {
-        throw new Error(`Unknown annotation kind: ${kind}`);
-      }
 
       validateAnnotationPayload(kind, payload);
 
       const now = new Date().toISOString();
-      const id = payload.id || crypto.randomUUID();
+      const id =
+        typeof payload.id === 'string' && payload.id
+          ? payload.id
+          : crypto.randomUUID();
       const existing = payload.id
-        ? db.queryOne(
+        ? db.queryOne<{ id: string; created_at: string }>(
             `SELECT id, created_at FROM ${config.table} WHERE id = ?`,
-            [payload.id],
+            [id],
           )
         : null;
 
-      const record = {
+      const record: AnnotationPayload = {
         ...payload,
         id,
         ...(kind === 'journalEntry'
@@ -157,7 +189,7 @@ export function createAnnotationStore(db) {
         );
         db.execute(
           `UPDATE ${config.table} SET ${updateFields.map((field) => `${field} = ?`).join(', ')} WHERE id = ?`,
-          [...updateFields.map((field) => record[field] ?? null), id],
+          [...updateFields.map((field) => toSqlValue(record[field])), id],
         );
       } else {
         db.execute(
@@ -165,18 +197,15 @@ export function createAnnotationStore(db) {
             INSERT INTO ${config.table} (id, ${config.fields.join(', ')})
             VALUES (?, ${config.fields.map(() => '?').join(', ')})
           `,
-          [id, ...config.fields.map((field) => record[field] ?? null)],
+          [id, ...config.fields.map((field) => toSqlValue(record[field]))],
         );
       }
 
       await db.persist();
       return id;
     },
-    async remove(kind, id) {
+    async remove(kind: AnnotationKind, id: string) {
       const config = TABLE_CONFIG[kind];
-      if (!config) {
-        throw new Error(`Unknown annotation kind: ${kind}`);
-      }
 
       db.execute(`DELETE FROM ${config.table} WHERE id = ?`, [id]);
       await db.persist();
