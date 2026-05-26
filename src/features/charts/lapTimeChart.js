@@ -118,7 +118,10 @@ export function createLapTimeChart(element, { onSelectLap, onLapRangeChange }) {
                     return {
                         type: 'rect',
                         shape: clippedRect,
-                        style: { opacity: 0.88 },
+                        style: {
+                            fill: api.visual('color') || params.data?.itemStyle?.color,
+                            opacity: 0.88,
+                        },
                     };
                 },
                 encode: { x: [0, 1], y: 2 },
