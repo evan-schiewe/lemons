@@ -1,6 +1,8 @@
 import * as echarts from 'echarts';
 import { escapeHtml, formatNumber } from '../../utils/format.js';
-import { formatDurationMs } from '../../utils/time.js';
+import { formatDurationMs, formatLapTimeHHMMSS } from '../../utils/time.js';
+
+let isHistogramExpanded = false;
 
 export function renderSummaryCards(container, summary, lapRows = [], options = {}) {
     const { greenFlagOnly = false } = options;
@@ -21,7 +23,7 @@ export function renderSummaryCards(container, summary, lapRows = [], options = {
         {
             label: 'Pace',
             value: formatDurationMs(paceMs),
-            note: greenFlagOnly ? 'Green flag laps only' : 'All laps (0-95% range)',
+            note: greenFlagOnly ? 'Green flag laps only' : 'All laps',
         },
         { label: 'Total Laps', value: formatNumber(summary.total_laps), note: 'All laps' },
         {
@@ -106,9 +108,10 @@ function formatPositionChanges(changes) {
 
 function buildLapHistogramCard(lapRows, options = {}) {
     const { greenFlagOnly = false } = options;
+    const useLogScale = !greenFlagOnly;
     const lapTimesMs = greenFlagOnly
-        ? getTrimmedGreenFlagLapTimes(lapRows)
-        : getTrimmedLapTimes(lapRows);
+        ? getGreenFlagLapTimes(lapRows)
+        : getLapTimes(lapRows);
 
     if (!lapTimesMs.length) {
         return {
@@ -118,17 +121,30 @@ function buildLapHistogramCard(lapRows, options = {}) {
         };
     }
 
-    const bins = buildHistogramBins(lapTimesMs, 12);
+    const bins = buildHistogramBins(lapTimesMs, 12, { useLogBins: useLogScale });
 
     return {
         label: 'Lap Time Histogram',
         visualHtml: `
           <div class="summary-card-visual">
+                        <button
+                            class="summary-card-expand-btn"
+                            type="button"
+                            data-action="expand-histogram"
+                            aria-label="Expand lap time histogram"
+                            aria-pressed="false"
+                            title="Expand chart"
+                        >
+                            ⛶
+                        </button>
             <div class="summary-card-histogram-chart" role="img" aria-label="Lap time histogram"></div>
           </div>
         `,
-        note: greenFlagOnly ? 'Green flag laps only' : 'All laps (0-95% range)',
-        chartData: bins,
+        note: greenFlagOnly ? 'Green flag laps only' : 'All laps (log count scale + log bins)',
+        chartData: {
+            bins,
+            useLogScale,
+        },
     };
 }
 
@@ -146,19 +162,27 @@ function getPaceMs(lapRows, options = {}) {
     return total / lapTimesMs.length;
 }
 
-function getTrimmedGreenFlagLapTimes(lapRows) {
-    const greenFlagLapTimes = lapRows
+function getGreenFlagLapTimes(lapRows) {
+    return lapRows
         .filter((row) => Number(row.is_green_flag) === 1)
         .map((row) => Number(row.lap_time_ms))
         .filter((value) => Number.isFinite(value) && value > 0);
+}
+
+function getLapTimes(lapRows) {
+    return lapRows
+        .map((row) => Number(row.lap_time_ms))
+        .filter((value) => Number.isFinite(value) && value > 0);
+}
+
+function getTrimmedGreenFlagLapTimes(lapRows) {
+    const greenFlagLapTimes = getGreenFlagLapTimes(lapRows);
 
     return trimLapTimesP95(greenFlagLapTimes);
 }
 
 function getTrimmedLapTimes(lapRows) {
-    const lapTimes = lapRows
-        .map((row) => Number(row.lap_time_ms))
-        .filter((value) => Number.isFinite(value) && value > 0);
+    const lapTimes = getLapTimes(lapRows);
 
     return trimLapTimesP95(lapTimes);
 }
@@ -178,16 +202,16 @@ function trimLapTimesP95(lapTimes) {
     return lapTimes.filter((value) => value <= p95);
 }
 
-function buildHistogramBins(values, binCount) {
+function buildHistogramBins(values, binCount, options = {}) {
+    const { useLogBins = false } = options;
     const sortedValues = [...values].sort((a, b) => a - b);
     const minValue = sortedValues[0];
     const maxValue = sortedValues[sortedValues.length - 1];
-    const robustMax = percentile(sortedValues, 0.95);
-    const bucketMin = minValue;
-    const bucketMax = Number.isFinite(robustMax) ? robustMax : maxValue;
-    const useRobustRange = bucketMax > bucketMin;
-    const lowerBound = useRobustRange ? bucketMin : minValue;
-    const upperBound = useRobustRange ? bucketMax : maxValue;
+    const lowerBound = minValue;
+    const upperBound = maxValue;
+    const useLogRange = useLogBins && lowerBound > 0 && upperBound > lowerBound;
+    const lowerLog = useLogRange ? Math.log(lowerBound) : 0;
+    const upperLog = useLogRange ? Math.log(upperBound) : 0;
     const counts = new Array(binCount).fill(0);
     const ranges = new Array(binCount).fill(null).map((_, index) => {
         if (upperBound === lowerBound) {
@@ -197,11 +221,17 @@ function buildHistogramBins(values, binCount) {
             };
         }
 
-        const bucketSize = (upperBound - lowerBound) / binCount;
-        const startMs = lowerBound + (bucketSize * index);
+        const bucketSize = useLogRange
+            ? (upperLog - lowerLog) / binCount
+            : (upperBound - lowerBound) / binCount;
+        const startMs = useLogRange
+            ? Math.exp(lowerLog + (bucketSize * index))
+            : lowerBound + (bucketSize * index);
         const endMs = index === binCount - 1
             ? upperBound
-            : lowerBound + (bucketSize * (index + 1));
+            : useLogRange
+                ? Math.exp(lowerLog + (bucketSize * (index + 1)))
+                : lowerBound + (bucketSize * (index + 1));
 
         return { startMs, endMs };
     });
@@ -209,10 +239,15 @@ function buildHistogramBins(values, binCount) {
     if (upperBound === lowerBound) {
         counts[0] = values.length;
     } else {
-        const bucketSize = (upperBound - lowerBound) / binCount;
+        const bucketSize = useLogRange
+            ? (upperLog - lowerLog) / binCount
+            : (upperBound - lowerBound) / binCount;
         values.forEach((value) => {
             const clampedValue = Math.max(lowerBound, Math.min(upperBound, value));
-            const binIndex = Math.min(binCount - 1, Math.floor((clampedValue - lowerBound) / bucketSize));
+            const offset = useLogRange
+                ? Math.log(clampedValue) - lowerLog
+                : clampedValue - lowerBound;
+            const binIndex = Math.min(binCount - 1, Math.floor(offset / bucketSize));
             counts[binIndex] += 1;
         });
     }
@@ -253,7 +288,12 @@ function disposeSummaryCardCharts(container) {
 }
 
 function initializeSummaryCardCharts(container, histogramBins) {
-    if (!Array.isArray(histogramBins) || !histogramBins.length) {
+    const bins = Array.isArray(histogramBins)
+        ? histogramBins
+        : histogramBins?.bins;
+    const useLogScale = Boolean(histogramBins?.useLogScale);
+
+    if (!Array.isArray(bins) || !bins.length) {
         return;
     }
 
@@ -264,35 +304,151 @@ function initializeSummaryCardCharts(container, histogramBins) {
 
     const chart = echarts.init(chartElement);
 
-    chart.setOption({
+    const histogramCard = chartElement.closest('.summary-card');
+    applyHistogramExpandedState({
+        chart,
+        chartElement,
+        histogramCard,
+        histogramBins: bins,
+        useLogScale,
+        expanded: isHistogramExpanded,
+    });
+
+    const expandButton = container.querySelector('[data-action="expand-histogram"]');
+    if (expandButton) {
+        updateHistogramExpandButton(expandButton, isHistogramExpanded);
+        expandButton.addEventListener('click', () => {
+            isHistogramExpanded = !isHistogramExpanded;
+            updateHistogramExpandButton(expandButton, isHistogramExpanded);
+            applyHistogramExpandedState({
+                chart,
+                chartElement,
+                histogramCard,
+                histogramBins: bins,
+                useLogScale,
+                expanded: isHistogramExpanded,
+            });
+        });
+    }
+}
+
+function applyHistogramExpandedState({ chart, chartElement, histogramCard, histogramBins, useLogScale, expanded }) {
+    if (histogramCard) {
+        histogramCard.classList.toggle('summary-card-expanded', expanded);
+    }
+
+    const expandedHeightPx = Math.max(300, Math.min(Math.floor(window.innerHeight * 0.62), 520));
+    chartElement.style.height = expanded ? `${expandedHeightPx}px` : '78px';
+
+    chart.setOption(buildHistogramChartOption(histogramBins, {
+        compact: !expanded,
+        useLogScale,
+    }));
+    chart.resize();
+    requestAnimationFrame(() => chart.resize());
+    setTimeout(() => chart.resize(), 220);
+}
+
+function updateHistogramExpandButton(button, expanded) {
+    button.setAttribute('aria-pressed', expanded ? 'true' : 'false');
+    button.setAttribute('title', expanded ? 'Collapse chart' : 'Expand chart');
+    button.setAttribute('aria-label', expanded ? 'Collapse lap time histogram' : 'Expand lap time histogram');
+    button.textContent = expanded ? '🗕' : '⛶';
+}
+
+function buildHistogramChartOption(histogramBins, options = {}) {
+    const { compact = true, useLogScale = false } = options;
+    const seriesData = histogramBins.map((bin) => {
+        const count = Number(bin?.value) || 0;
+        return {
+            ...bin,
+            rawCount: count,
+            // Log axes do not support zero or negative values.
+            value: useLogScale ? (count > 0 ? count : null) : count,
+        };
+    });
+
+    return {
         animation: false,
-        grid: { left: 0, right: 0, top: 24, bottom: 0 },
+        grid: compact
+            ? { left: 0, right: 0, top: 24, bottom: 0 }
+            : { left: 72, right: 24, top: 36, bottom: 82 },
         xAxis: {
             type: 'category',
             data: histogramBins.map((_, index) => `${index + 1}`),
-            show: false,
+            show: !compact,
+            name: compact ? undefined : 'Lap Time (ms)',
+            nameLocation: compact ? undefined : 'middle',
+            nameGap: compact ? undefined : 52,
+            nameTextStyle: compact
+                ? undefined
+                : {
+                    color: '#6b5d4d',
+                    fontWeight: 600,
+                },
+            axisLabel: compact
+                ? undefined
+                : {
+                    show: true,
+                    formatter: (_value, index) => {
+                        const bin = histogramBins[index];
+                        const startMs = Number(bin?.startMs);
+                        const endMs = Number(bin?.endMs);
+                        if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+                            return `${index + 1}`;
+                        }
+
+                        return `${formatLapTimeHHMMSS(startMs)}\n${formatLapTimeHHMMSS(endMs)}`;
+                    },
+                    color: '#6b5d4d',
+                    fontSize: 10,
+                    interval: 0,
+                    hideOverlap: false,
+                    rotate: 0,
+                    margin: 10,
+                },
+            axisLine: compact ? undefined : { show: true, lineStyle: { color: '#8f7a60' } },
+            axisTick: compact ? undefined : { show: true },
         },
         yAxis: {
-            type: 'value',
-            min: 0,
-            show: false,
+            type: useLogScale ? 'log' : 'value',
+            min: useLogScale ? 1 : 0,
+            show: !compact,
+            name: compact ? undefined : (useLogScale ? 'Count (laps, log)' : 'Count (laps)'),
+            nameLocation: compact ? undefined : 'middle',
+            nameGap: compact ? undefined : 56,
+            nameTextStyle: compact ? undefined : { color: '#6b5d4d' },
+            axisLabel: compact
+                ? undefined
+                : {
+                    show: true,
+                    color: '#6b5d4d',
+                    formatter: (value) => `${formatNumber(value)} laps`,
+                    hideOverlap: false,
+                },
+            axisLine: compact ? undefined : { show: true, lineStyle: { color: '#8f7a60' } },
+            axisTick: compact ? undefined : { show: true },
         },
         tooltip: {
             trigger: 'axis',
             confine: true,
             axisPointer: { type: 'shadow' },
-            position: (_point, _params, dom) => {
-                const tooltipWidth = dom?.offsetWidth ?? 0;
-                const chartWidth = chartElement.clientWidth;
-                const horizontalPadding = 6;
-                const centeredLeft = (chartWidth - tooltipWidth) / 2;
-                const maxLeft = Math.max(horizontalPadding, chartWidth - tooltipWidth - horizontalPadding);
+            ...(compact
+                ? {
+                    position: (_point, _params, dom, _rect, size) => {
+                        const tooltipWidth = dom?.offsetWidth ?? 0;
+                        const chartWidth = size?.viewSize?.[0] ?? 0;
+                        const horizontalPadding = 6;
+                        const centeredLeft = (chartWidth - tooltipWidth) / 2;
+                        const maxLeft = Math.max(horizontalPadding, chartWidth - tooltipWidth - horizontalPadding);
 
-                return [Math.min(Math.max(horizontalPadding, centeredLeft), maxLeft), 0];
-            },
+                        return [Math.min(Math.max(horizontalPadding, centeredLeft), maxLeft), 0];
+                    },
+                }
+                : {}),
             formatter: (params) => {
                 const point = Array.isArray(params) ? params[0] : params;
-                const count = Number(point?.data?.value ?? point?.value) || 0;
+                const count = Number(point?.data?.rawCount ?? point?.data?.value ?? point?.value) || 0;
                 const startMs = point?.data?.startMs;
                 const endMs = point?.data?.endMs;
                 const rangeLabel = Number.isFinite(startMs) && Number.isFinite(endMs)
@@ -304,12 +460,12 @@ function initializeSummaryCardCharts(container, histogramBins) {
         },
         series: [{
             type: 'bar',
-            data: histogramBins,
+            data: seriesData,
             barCategoryGap: '24%',
             itemStyle: {
                 color: 'rgba(217, 79, 43, 0.82)',
                 borderRadius: [2, 2, 0, 0],
             },
         }],
-    });
+    };
 }

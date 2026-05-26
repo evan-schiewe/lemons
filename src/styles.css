@@ -318,12 +318,51 @@ textarea {
 }
 
 .summary-card-visual {
+  position: relative;
   margin-top: 8px;
 }
 
+.summary-card-expand-btn {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 91, 55, 0.28);
+  background: rgba(255, 250, 244, 0.9);
+  color: #5f4b34;
+  font-size: 0.9rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
+}
+
+.summary-card-expand-btn:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 250, 244, 1);
+  box-shadow: 0 8px 20px rgba(92, 68, 38, 0.18);
+}
+
+.summary-card-expand-btn:focus-visible {
+  outline: 2px solid rgba(217, 79, 43, 0.45);
+  outline-offset: 2px;
+}
+
 .summary-card-histogram-chart {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 78px;
+}
+
+.summary-card.summary-card-expanded {
+  grid-column: 1 / -1;
+}
+
+.summary-card.summary-card-expanded .summary-card-histogram-chart {
+  min-height: 300px;
 }
 
 .chart-surface {
