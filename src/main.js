@@ -221,6 +221,11 @@ async function initialize() {
     wireEvents();
     await refreshRaceOptions();
     await refreshView();
+    if (state.db.didRefreshBundledDatabase) {
+        setStatus('Ready. Detected a newer deployment and refreshed the local bundled database cache.');
+        return;
+    }
+
     setStatus('Ready. Import lap CSV files or restore a SQLite export to begin.');
 }
 

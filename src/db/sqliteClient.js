@@ -4,12 +4,18 @@ import schemaSql from './schema.sql?raw';
 import { normalizeRaceData } from '../model/normalizeRaceData.js';
 
 const DATABASE_FILE_NAME = 'lemons-race-viewer.sqlite';
+const DEFAULT_DATABASE_URL = './assets/default-data.sqlite';
+const STORAGE_SOURCE_KEY = 'lemons-race-viewer-db-source';
+const STORAGE_BUNDLE_VERSION_KEY = 'lemons-race-viewer-bundle-version';
+const STORAGE_SOURCE_BUNDLE = 'bundle';
+const STORAGE_SOURCE_CUSTOM = 'custom';
 
 export class SQLiteClient {
     constructor() {
         this.SQL = null;
         this.db = null;
         this.storageMode = 'memory';
+        this.didRefreshBundledDatabase = false;
     }
 
     async init() {
@@ -92,6 +98,7 @@ export class SQLiteClient {
 
     execute(sql, params = []) {
         this.db.run(sql, params);
+        this.markDatabaseAsCustom();
     }
 
     executeMany(sql, rows) {
@@ -104,6 +111,10 @@ export class SQLiteClient {
             });
         } finally {
             statement.free();
+        }
+
+        if (rows?.length) {
+            this.markDatabaseAsCustom();
         }
     }
 
@@ -231,6 +242,7 @@ export class SQLiteClient {
         try {
             const result = work();
             this.db.run('COMMIT');
+            this.markDatabaseAsCustom();
             return result;
         } catch (error) {
             this.db.run('ROLLBACK');
@@ -268,6 +280,7 @@ export class SQLiteClient {
             this.db = restoredDatabase;
             await this.persist();
             this.storageMode = this.storageMode || 'memory';
+            this.markDatabaseAsCustom();
 
             if (previousDb) {
                 previousDb.close();
@@ -292,19 +305,37 @@ export class SQLiteClient {
     }
 
     async loadPersistedBytes() {
+        this.didRefreshBundledDatabase = false;
+
+        const bundledVersion = await this.fetchBundledVersion();
         const opfsBytes = await this.readFromOpfs();
         if (opfsBytes?.length) {
-            this.storageMode = 'opfs-cache';
-            return opfsBytes;
+            const source = this.getStorageSource();
+            const storedBundleVersion = this.getStoredBundleVersion();
+            const shouldRefreshBundledCopy =
+                source !== STORAGE_SOURCE_CUSTOM &&
+                bundledVersion &&
+                storedBundleVersion &&
+                bundledVersion !== storedBundleVersion;
+
+            if (shouldRefreshBundledCopy) {
+                await this.deleteFromOpfs();
+                this.didRefreshBundledDatabase = true;
+            } else {
+                this.storageMode = 'opfs-cache';
+                return opfsBytes;
+            }
         }
 
         // First-run: fetch bundled default data
         try {
-            const response = await fetch('./assets/default-data.sqlite');
+            const response = await fetch(DEFAULT_DATABASE_URL);
             if (response.ok) {
                 const arrayBuffer = await response.arrayBuffer();
                 const bytes = new Uint8Array(arrayBuffer);
                 if (bytes.length > 0) {
+                    const resolvedVersion = bundledVersion ?? this.resolveBundleVersion(response.headers);
+                    this.recordBundleSeed(resolvedVersion);
                     this.storageMode = 'memory'; // Will persist to OPFS on next persist()
                     return bytes;
                 }
@@ -322,6 +353,8 @@ export class SQLiteClient {
 
         try {
             localStorage.removeItem('lemons-race-viewer-db');
+            localStorage.removeItem(STORAGE_SOURCE_KEY);
+            localStorage.removeItem(STORAGE_BUNDLE_VERSION_KEY);
         } catch {
             // Ignore storage access failures while clearing data.
         }
@@ -376,6 +409,75 @@ export class SQLiteClient {
             await root.removeEntry(DATABASE_FILE_NAME);
         } catch {
             // Ignore if the file does not exist or cannot be deleted.
+        }
+    }
+
+    markDatabaseAsCustom() {
+        try {
+            localStorage.setItem(STORAGE_SOURCE_KEY, STORAGE_SOURCE_CUSTOM);
+        } catch {
+            // Ignore localStorage access issues.
+        }
+    }
+
+    recordBundleSeed(version) {
+        try {
+            localStorage.setItem(STORAGE_SOURCE_KEY, STORAGE_SOURCE_BUNDLE);
+            if (version) {
+                localStorage.setItem(STORAGE_BUNDLE_VERSION_KEY, version);
+            } else {
+                localStorage.removeItem(STORAGE_BUNDLE_VERSION_KEY);
+            }
+        } catch {
+            // Ignore localStorage access issues.
+        }
+    }
+
+    getStorageSource() {
+        try {
+            return localStorage.getItem(STORAGE_SOURCE_KEY) || STORAGE_SOURCE_BUNDLE;
+        } catch {
+            return STORAGE_SOURCE_BUNDLE;
+        }
+    }
+
+    getStoredBundleVersion() {
+        try {
+            return localStorage.getItem(STORAGE_BUNDLE_VERSION_KEY);
+        } catch {
+            return null;
+        }
+    }
+
+    resolveBundleVersion(headers) {
+        const etag = headers.get('etag');
+        if (etag) {
+            return `etag:${etag}`;
+        }
+
+        const lastModified = headers.get('last-modified');
+        const contentLength = headers.get('content-length');
+        if (lastModified || contentLength) {
+            return `lm:${lastModified || 'unknown'}|len:${contentLength || 'unknown'}`;
+        }
+
+        return null;
+    }
+
+    async fetchBundledVersion() {
+        try {
+            const response = await fetch(DEFAULT_DATABASE_URL, {
+                method: 'HEAD',
+                cache: 'no-store',
+            });
+
+            if (!response.ok) {
+                return null;
+            }
+
+            return this.resolveBundleVersion(response.headers);
+        } catch {
+            return null;
         }
     }
 }
