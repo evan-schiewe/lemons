@@ -2,7 +2,9 @@ import * as echarts from 'echarts';
 import { escapeHtml, formatNumber } from '../../utils/format.js';
 import { formatDurationMs } from '../../utils/time.js';
 
-export function renderSummaryCards(container, summary, lapRows = []) {
+export function renderSummaryCards(container, summary, lapRows = [], options = {}) {
+    const { greenFlagOnly = false } = options;
+
     disposeSummaryCardCharts(container);
 
     if (!summary || Number(summary.total_laps) === 0) {
@@ -10,16 +12,16 @@ export function renderSummaryCards(container, summary, lapRows = []) {
         return;
     }
 
-    const greenFlagPaceMs = getGreenFlagPaceMs(lapRows);
-    const positionChanges = getGreenLapPositionChanges(lapRows);
+    const paceMs = getPaceMs(lapRows, { greenFlagOnly });
+    const positionChanges = getLapPositionChanges(lapRows, { greenFlagOnly });
     const histogramCard = buildLapHistogramCard(lapRows);
 
     const cards = [
         { label: 'Best Lap', value: formatDurationMs(summary.best_lap_ms) },
         {
-            label: 'Green Flag Pace',
-            value: formatDurationMs(Number.isFinite(greenFlagPaceMs) ? greenFlagPaceMs : summary.avg_green_ms),
-            note: 'Green flag laps (0-95% range)',
+            label: 'Pace',
+            value: formatDurationMs(paceMs),
+            note: greenFlagOnly ? 'Green flag laps (0-95% range)' : 'All laps (0-95% range)',
         },
         { label: 'Total Laps', value: formatNumber(summary.total_laps), note: 'All laps' },
         {
@@ -31,7 +33,7 @@ export function renderSummaryCards(container, summary, lapRows = []) {
         {
             label: 'Positions Gained/Lost',
             value: formatPositionChanges(positionChanges),
-            note: 'Green flag laps only',
+            note: greenFlagOnly ? 'Green flag laps only' : 'All laps',
         },
         { label: 'Driver Stints', value: formatNumber(summary.stint_count) },
         histogramCard,
@@ -52,7 +54,9 @@ export function renderSummaryCards(container, summary, lapRows = []) {
     initializeSummaryCardCharts(container, histogramCard.chartData ?? null);
 }
 
-function getGreenLapPositionChanges(lapRows) {
+function getLapPositionChanges(lapRows, options = {}) {
+    const { greenFlagOnly = false } = options;
+
     if (!Array.isArray(lapRows) || !lapRows.length) {
         return null;
     }
@@ -64,7 +68,7 @@ function getGreenLapPositionChanges(lapRows) {
             return Number.isFinite(lapNumber)
                 && Number.isFinite(position)
                 && position > 0
-                && Number(row.is_green_flag) === 1;
+                && (!greenFlagOnly || Number(row.is_green_flag) === 1);
         })
         .sort((a, b) => Number(a.lap_number) - Number(b.lap_number));
 
@@ -74,17 +78,9 @@ function getGreenLapPositionChanges(lapRows) {
 
     let gained = 0;
     let lost = 0;
-    let hasContiguousPair = false;
-
     for (let index = 1; index < validRows.length; index += 1) {
         const previousRow = validRows[index - 1];
         const currentRow = validRows[index];
-        const previousLap = Number(previousRow.lap_number);
-        const currentLap = Number(currentRow.lap_number);
-
-        if (currentLap !== previousLap + 1) {
-            continue;
-        }
 
         const previousPosition = Number(previousRow.position_value);
         const currentPosition = Number(currentRow.position_value);
@@ -95,11 +91,6 @@ function getGreenLapPositionChanges(lapRows) {
         } else if (delta < 0) {
             lost += Math.abs(delta);
         }
-        hasContiguousPair = true;
-    }
-
-    if (!hasContiguousPair) {
-        return null;
     }
 
     return { gained, lost };
@@ -138,8 +129,12 @@ function buildLapHistogramCard(lapRows) {
     };
 }
 
-function getGreenFlagPaceMs(lapRows) {
-    const lapTimesMs = getTrimmedGreenFlagLapTimes(lapRows);
+function getPaceMs(lapRows, options = {}) {
+    const { greenFlagOnly = false } = options;
+    const lapTimesMs = greenFlagOnly
+        ? getTrimmedGreenFlagLapTimes(lapRows)
+        : getTrimmedLapTimes(lapRows);
+
     if (!lapTimesMs.length) {
         return Number.NaN;
     }
@@ -154,18 +149,30 @@ function getTrimmedGreenFlagLapTimes(lapRows) {
         .map((row) => Number(row.lap_time_ms))
         .filter((value) => Number.isFinite(value) && value > 0);
 
-    if (!greenFlagLapTimes.length) {
+    return trimLapTimesP95(greenFlagLapTimes);
+}
+
+function getTrimmedLapTimes(lapRows) {
+    const lapTimes = lapRows
+        .map((row) => Number(row.lap_time_ms))
+        .filter((value) => Number.isFinite(value) && value > 0);
+
+    return trimLapTimesP95(lapTimes);
+}
+
+function trimLapTimesP95(lapTimes) {
+    if (!lapTimes.length) {
         return [];
     }
 
-    const sorted = [...greenFlagLapTimes].sort((a, b) => a - b);
+    const sorted = [...lapTimes].sort((a, b) => a - b);
     const p95 = percentile(sorted, 0.95);
 
     if (!Number.isFinite(p95)) {
-        return greenFlagLapTimes;
+        return lapTimes;
     }
 
-    return greenFlagLapTimes.filter((value) => value <= p95);
+    return lapTimes.filter((value) => value <= p95);
 }
 
 function buildHistogramBins(values, binCount) {

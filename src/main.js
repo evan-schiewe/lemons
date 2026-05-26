@@ -38,6 +38,7 @@ const refs = {
     lapMin: document.querySelector('#lap-min'),
     lapMax: document.querySelector('#lap-max'),
     raceStartTime: document.querySelector('#race-start-time'),
+    summaryGreenOnly: document.querySelector('#summary-green-only'),
     importStatus: document.querySelector('#import-status'),
     summaryCards: document.querySelector('#summary-cards'),
     tableBody: document.querySelector('#lap-table-body'),
@@ -77,6 +78,7 @@ const state = {
     helperViewMode: 'queue', // 'queue' or 'form'
     lapRangeBounds: null,
     lapRangeRaceId: '',
+    summaryGreenOnly: true,
 };
 
 const charts = {
@@ -149,6 +151,11 @@ async function initialize() {
 
     // Restore helper state from localStorage
     state.helperAutoAdvance = localStorage.getItem('helperAutoAdvance') === '1';
+    const persistedSummaryGreenOnly = localStorage.getItem('summaryGreenOnly');
+    state.summaryGreenOnly = persistedSummaryGreenOnly == null ? true : persistedSummaryGreenOnly === '1';
+    if (refs.summaryGreenOnly) {
+        refs.summaryGreenOnly.checked = state.summaryGreenOnly;
+    }
 
     // Initialize annotation helper
     const helperContainer = refs.helperContainer;
@@ -249,6 +256,11 @@ function wireEvents() {
         } else {
             setStatus('Race start time cleared.');
         }
+    });
+    refs.summaryGreenOnly.addEventListener('change', async (event) => {
+        state.summaryGreenOnly = event.target.checked;
+        localStorage.setItem('summaryGreenOnly', state.summaryGreenOnly ? '1' : '0');
+        await refreshView();
     });
     refs.exportJson.addEventListener('click', () => {
         if (state.activeRaceId) {
@@ -475,7 +487,9 @@ async function refreshView(options = {}) {
         state.lapRangeBounds = null;
         state.lapRangeRaceId = '';
         syncLapRangeInputs(null, { prefill: false });
-        renderSummaryCards(refs.summaryCards, null, []);
+        renderSummaryCards(refs.summaryCards, null, [], {
+            greenFlagOnly: state.summaryGreenOnly,
+        });
         renderLapTable(refs.tableBody, [], state.selectedLapId, null);
         state.currentAnnotations = {
             lapNotes: [],
@@ -538,7 +552,9 @@ async function refreshView(options = {}) {
         state.selectedLapId = '';
     }
 
-    renderSummaryCards(refs.summaryCards, summary, rows);
+    renderSummaryCards(refs.summaryCards, summary, rows, {
+        greenFlagOnly: state.summaryGreenOnly,
+    });
     const activeRace = state.races.find((race) => race.id === state.activeRaceId);
     renderLapTable(refs.tableBody, rows, state.selectedLapId, activeRace?.race_start_time ?? null);
 
