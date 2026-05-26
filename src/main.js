@@ -24,6 +24,7 @@ import {
 import { renderLapTable, updateSortIndicators, scrollToLap } from './features/table/lapTable.js';
 
 const refs = {
+    appInitStatus: document.querySelector('#app-init-status'),
     heroActionsHost: document.querySelector('#hero-actions-host'),
     dataActions: document.querySelector('#data-actions'),
     dataActionsSlot: document.querySelector('#data-actions-slot'),
@@ -140,9 +141,11 @@ function createAnnotationHandlers({ autoAdvanceOnSave = false } = {}) {
 initialize().catch((error) => {
     console.error(error);
     setStatus(`Initialization failed: ${error.message}`);
+    setAppLoadingState(false);
 });
 
 async function initialize() {
+    setAppLoadingState(true);
     setStatus('Initializing browser SQLite cache...');
     state.db = await new SQLiteClient().init();
     state.annotationStore = createAnnotationStore(state.db);
@@ -222,10 +225,12 @@ async function initialize() {
     await refreshRaceOptions();
     await refreshView();
     if (state.db.didRefreshBundledDatabase) {
+        setAppLoadingState(false);
         setStatus('Ready. Detected a newer deployment and refreshed the local bundled database cache.');
         return;
     }
 
+    setAppLoadingState(false);
     setStatus('Ready. Import lap CSV files or restore a SQLite export to begin.');
 }
 
@@ -348,6 +353,10 @@ function syncDataTabAndActions() {
     const targetHost = hasData ? refs.dataActionsSlot : refs.heroActionsHost;
     if (targetHost && refs.dataActions && refs.dataActions.parentElement !== targetHost) {
         targetHost.append(refs.dataActions);
+    }
+
+    if (refs.heroActionsHost) {
+        refs.heroActionsHost.hidden = hasData;
     }
 }
 
@@ -771,6 +780,14 @@ function hasAnnotationsForLap(lapRow, annotations) {
 
 function setStatus(message) {
     refs.importStatus.textContent = message;
+    if (refs.appInitStatus && document.body.classList.contains('app-loading')) {
+        refs.appInitStatus.textContent = message;
+    }
+}
+
+function setAppLoadingState(isLoading) {
+    document.body.classList.toggle('app-loading', isLoading);
+    document.body.classList.toggle('app-ready', !isLoading);
 }
 
 function datetimeLocalToIso(value) {
