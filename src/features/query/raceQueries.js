@@ -21,18 +21,6 @@ export function getRaceList(db) {
     );
 }
 
-export function updateRaceStartTime(db, raceId, raceStartTime) {
-    const timestamp = new Date().toISOString();
-    db.execute(
-        `
-      UPDATE races
-      SET race_start_time = ?, updated_at = ?
-      WHERE id = ?
-    `,
-        [raceStartTime, timestamp, raceId],
-    );
-}
-
 export function getDriverOptions(db, raceId) {
     return db.query(
         `

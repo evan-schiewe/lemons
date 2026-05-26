@@ -2,32 +2,33 @@ import { loadCsvFile } from '../../import/csvLoader.js';
 import { parseRaceCsv } from '../../import/parseRaceCsv.js';
 import { normalizeRaceData } from '../../model/normalizeRaceData.js';
 
-export async function importRace(db, file) {
+export async function importRace(db, file, options = {}) {
     const loadedFile = await loadCsvFile(file);
     const parsedCsv = parseRaceCsv(loadedFile.text);
     const normalized = normalizeRaceData(parsedCsv.rows);
     const timestamp = new Date().toISOString();
     const raceKey = `race-${loadedFile.contentHash}`;
-    const existingRace = db.queryOne('SELECT id FROM races WHERE race_key = ?', [raceKey]);
+    const existingRace = db.queryOne('SELECT id, race_start_time FROM races WHERE race_key = ?', [raceKey]);
     const raceId = existingRace?.id ?? crypto.randomUUID();
+    const raceStartTime = options.raceStartTime === undefined ? (existingRace?.race_start_time ?? null) : options.raceStartTime;
 
     db.transaction(() => {
         if (existingRace) {
             db.execute(
                 `
           UPDATE races
-          SET name = ?, source_file_name = ?, content_hash = ?, row_count = ?, updated_at = ?
+          SET name = ?, source_file_name = ?, content_hash = ?, race_start_time = ?, row_count = ?, updated_at = ?
           WHERE id = ?
         `,
-                [loadedFile.raceName, loadedFile.fileName, loadedFile.contentHash, normalized.laps.length, timestamp, raceId],
+                [loadedFile.raceName, loadedFile.fileName, loadedFile.contentHash, raceStartTime, normalized.laps.length, timestamp, raceId],
             );
             db.execute('DELETE FROM raw_lap_rows WHERE race_id = ?', [raceId]);
             db.execute('DELETE FROM normalized_laps WHERE race_id = ?', [raceId]);
         } else {
             db.execute(
                 `
-          INSERT INTO races (id, race_key, name, source_file_name, content_hash, row_count, imported_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO races (id, race_key, name, source_file_name, content_hash, race_start_time, row_count, imported_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
                 [
                     raceId,
@@ -35,6 +36,7 @@ export async function importRace(db, file) {
                     loadedFile.raceName,
                     loadedFile.fileName,
                     loadedFile.contentHash,
+                    raceStartTime,
                     normalized.laps.length,
                     timestamp,
                     timestamp,

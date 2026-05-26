@@ -14,14 +14,14 @@ export function renderSummaryCards(container, summary, lapRows = [], options = {
 
     const paceMs = getPaceMs(lapRows, { greenFlagOnly });
     const positionChanges = getLapPositionChanges(lapRows, { greenFlagOnly });
-    const histogramCard = buildLapHistogramCard(lapRows);
+    const histogramCard = buildLapHistogramCard(lapRows, { greenFlagOnly });
 
     const cards = [
         { label: 'Best Lap', value: formatDurationMs(summary.best_lap_ms) },
         {
             label: 'Pace',
             value: formatDurationMs(paceMs),
-            note: greenFlagOnly ? 'Green flag laps (0-95% range)' : 'All laps (0-95% range)',
+            note: greenFlagOnly ? 'Green flag laps only' : 'All laps (0-95% range)',
         },
         { label: 'Total Laps', value: formatNumber(summary.total_laps), note: 'All laps' },
         {
@@ -104,14 +104,17 @@ function formatPositionChanges(changes) {
     return `${formatNumber(changes.gained)}/${formatNumber(changes.lost)}`;
 }
 
-function buildLapHistogramCard(lapRows) {
-    const lapTimesMs = getTrimmedGreenFlagLapTimes(lapRows);
+function buildLapHistogramCard(lapRows, options = {}) {
+    const { greenFlagOnly = false } = options;
+    const lapTimesMs = greenFlagOnly
+        ? getTrimmedGreenFlagLapTimes(lapRows)
+        : getTrimmedLapTimes(lapRows);
 
     if (!lapTimesMs.length) {
         return {
             label: 'Lap Time Histogram',
             value: '-',
-            note: 'No green flag laps in current filter',
+            note: greenFlagOnly ? 'No green flag laps in current filter' : 'No laps in current filter',
         };
     }
 
@@ -124,7 +127,7 @@ function buildLapHistogramCard(lapRows) {
             <div class="summary-card-histogram-chart" role="img" aria-label="Lap time histogram"></div>
           </div>
         `,
-        note: 'Green flag laps (0-95% range)',
+        note: greenFlagOnly ? 'Green flag laps only' : 'All laps (0-95% range)',
         chartData: bins,
     };
 }
@@ -263,7 +266,7 @@ function initializeSummaryCardCharts(container, histogramBins) {
 
     chart.setOption({
         animation: false,
-        grid: { left: 0, right: 0, top: 0, bottom: 0 },
+        grid: { left: 0, right: 0, top: 24, bottom: 0 },
         xAxis: {
             type: 'category',
             data: histogramBins.map((_, index) => `${index + 1}`),
@@ -276,7 +279,17 @@ function initializeSummaryCardCharts(container, histogramBins) {
         },
         tooltip: {
             trigger: 'axis',
+            confine: true,
             axisPointer: { type: 'shadow' },
+            position: (_point, _params, dom) => {
+                const tooltipWidth = dom?.offsetWidth ?? 0;
+                const chartWidth = chartElement.clientWidth;
+                const horizontalPadding = 6;
+                const centeredLeft = (chartWidth - tooltipWidth) / 2;
+                const maxLeft = Math.max(horizontalPadding, chartWidth - tooltipWidth - horizontalPadding);
+
+                return [Math.min(Math.max(horizontalPadding, centeredLeft), maxLeft), 0];
+            },
             formatter: (params) => {
                 const point = Array.isArray(params) ? params[0] : params;
                 const count = Number(point?.data?.value ?? point?.value) || 0;

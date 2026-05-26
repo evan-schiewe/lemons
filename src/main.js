@@ -18,7 +18,6 @@ import {
     getRaceTimelineEvents,
     getRaceList,
     getSummary,
-    updateRaceStartTime,
     getCandidates,
     augmentCandidateWithReviewStatus,
 } from './features/query/raceQueries.js';
@@ -37,7 +36,6 @@ const refs = {
     searchFilter: document.querySelector('#search-filter'),
     lapMin: document.querySelector('#lap-min'),
     lapMax: document.querySelector('#lap-max'),
-    raceStartTime: document.querySelector('#race-start-time'),
     summaryGreenOnly: document.querySelector('#summary-green-only'),
     importStatus: document.querySelector('#import-status'),
     summaryCards: document.querySelector('#summary-cards'),
@@ -240,23 +238,6 @@ function wireEvents() {
     refs.searchFilter.addEventListener('input', refreshView);
     refs.lapMin.addEventListener('input', () => handleLapRangeInput('lapMin'));
     refs.lapMax.addEventListener('input', () => handleLapRangeInput('lapMax'));
-    refs.raceStartTime.addEventListener('change', async (event) => {
-        if (!state.activeRaceId) {
-            return;
-        }
-
-        const raceStartIso = datetimeLocalToIso(event.target.value);
-        updateRaceStartTime(state.db, state.activeRaceId, raceStartIso);
-        await state.db.persist();
-        await refreshRaceOptions();
-        await refreshView();
-
-        if (raceStartIso) {
-            setStatus('Race start time saved.');
-        } else {
-            setStatus('Race start time cleared.');
-        }
-    });
     refs.summaryGreenOnly.addEventListener('change', async (event) => {
         state.summaryGreenOnly = event.target.checked;
         localStorage.setItem('summaryGreenOnly', state.summaryGreenOnly ? '1' : '0');
@@ -408,8 +389,17 @@ async function handleImport(event) {
 
     const messages = [];
     for (const file of files) {
+        const importOptions = promptForRaceImportOptions(file.name);
+        if (importOptions.cancelled) {
+            refs.csvInput.value = '';
+            setStatus(`Import cancelled before ${file.name}.`);
+            return;
+        }
+
         setStatus(`Importing ${file.name}...`);
-        const result = await importRace(state.db, file);
+        const result = await importRace(state.db, file, {
+            raceStartTime: importOptions.raceStartTime,
+        });
         messages.push(`${result.raceName}: ${result.rowCount} laps${result.warnings.length ? ` (${result.warnings.length} repairs/warnings)` : ''}`);
         state.activeRaceId = result.raceId;
     }
@@ -463,13 +453,7 @@ async function refreshRaceOptions() {
     }
 
     refs.raceSelect.value = state.activeRaceId;
-    syncRaceStartTimeInput();
     await refreshDriverOptions();
-}
-
-function syncRaceStartTimeInput() {
-    const activeRace = state.races.find((race) => race.id === state.activeRaceId);
-    refs.raceStartTime.value = isoToDatetimeLocal(activeRace?.race_start_time ?? null);
 }
 
 async function refreshDriverOptions() {
@@ -784,24 +768,6 @@ function setStatus(message) {
     refs.importStatus.textContent = message;
 }
 
-function isoToDatetimeLocal(value) {
-    if (!value) {
-        return '';
-    }
-
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) {
-        return '';
-    }
-
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    const hours = String(date.getHours()).padStart(2, '0');
-    const minutes = String(date.getMinutes()).padStart(2, '0');
-    return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
 function datetimeLocalToIso(value) {
     const trimmed = `${value ?? ''}`.trim();
     if (!trimmed) {
@@ -814,4 +780,29 @@ function datetimeLocalToIso(value) {
     }
 
     return parsed.toISOString();
+}
+
+function promptForRaceImportOptions(fileName) {
+    while (true) {
+        const response = window.prompt(
+            `Race start time for ${fileName}\nEnter local time as YYYY-MM-DDTHH:mm.\nLeave blank to skip.`,
+            '',
+        );
+
+        if (response == null) {
+            return { cancelled: true, raceStartTime: null };
+        }
+
+        const trimmed = response.trim();
+        if (!trimmed) {
+            return { cancelled: false, raceStartTime: null };
+        }
+
+        const raceStartTime = datetimeLocalToIso(trimmed);
+        if (raceStartTime) {
+            return { cancelled: false, raceStartTime };
+        }
+
+        window.alert('Invalid race start time. Use YYYY-MM-DDTHH:mm, for example 2026-05-25T09:30.');
+    }
 }
