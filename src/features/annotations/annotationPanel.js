@@ -331,7 +331,7 @@ function renderPanel(viewModel, activeEdit, activeKind) {
     <section class="annotation-section annotation-editor-intro">
       <div>
         <strong>${selected ? `Lap ${escapeHtml(selected.lap_number)}` : 'No selected lap'}</strong>
-        <p class="annotation-meta">${selected ? escapeHtml(selected.driver_name || 'Unknown driver') : 'Select a lap in the table or chart to prefill forms for incidents and spans.'}</p>
+        <p class="annotation-meta">${selected ? escapeHtml(selected.display_driver_name || selected.driver_name || 'Unknown driver') : 'Select a lap in the table or chart to prefill forms for incidents and spans.'}</p>
         ${activeEdit ? `<p class="annotation-meta annotation-edit-state">Editing ${escapeHtml(KIND_CONFIG[activeEdit.kind].title)}</p>` : '<p class="annotation-meta annotation-edit-state">Forms stay hidden until you open the editor modal.</p>'}
       </div>
       <div class="annotation-editor-actions">
@@ -339,7 +339,6 @@ function renderPanel(viewModel, activeEdit, activeKind) {
         <button class="button secondary" data-action="open-modal" type="button">New Annotation</button>
       </div>
     </section>
-    ${renderSelectedLapDetails(viewModel)}
     ${renderListSection('Tagged Incidents', 'taggedIncident', viewModel.annotations.taggedIncidents, renderTaggedIncidentItem)}
     ${renderListSection('Range Events', 'rangeEvent', viewModel.annotations.rangeEvents, renderRangeEventItem)}
     ${renderListSection('Driver Stints', 'driverStint', viewModel.annotations.driverStints, renderDriverStintItem)}
@@ -450,30 +449,39 @@ function renderModal(viewModel, activeEdit, activeKind, modalView = 'form') {
 }
 
 function renderLapDetailsModal(viewModel) {
-  const selectedLapNumber = viewModel?.selectedLapRow?.lap_number;
+  const selected = viewModel?.selectedLapRow;
+  const details = selected ? buildSelectedLapDetails(selected, viewModel.annotations) : null;
+  const detailsContent = details
+    ? `
+        <div class="selected-lap-grid">
+          ${renderSelectedLapList('Lap Notes', details.lapNotes, (item) => `${escapeHtml(item.note_text || 'No details')}`)}
+          ${renderSelectedLapList(
+      'Tagged Incidents',
+      details.taggedIncidents,
+      (item) => `<strong>${escapeHtml(item.tag)}</strong> · ${escapeHtml(item.title || 'Untitled')}<div class="annotation-meta">${escapeHtml(item.details || 'No details')}</div>`,
+      (item) => renderSelectedLapTaggedIncidentActions(item),
+    )}
+          ${renderSelectedLapList('Range Events Covering Lap', details.rangeEvents, (item) => `<strong>${escapeHtml(item.tag)}</strong> · Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)}<div class="annotation-meta">${escapeHtml(item.title || 'Untitled')}</div>`)}
+          ${renderSelectedLapList('Driver Stints Covering Lap', details.driverStints, (item) => `<strong>${escapeHtml(item.driver_name || 'Unknown driver')}</strong> · Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)}<div class="annotation-meta">${escapeHtml(item.notes || 'No stint notes')}</div>`)}
+        </div>
+      `
+    : '<p class="annotation-meta">Click a lap table row to inspect flags and matching annotations.</p>';
+
   return `
     <div class="annotation-modal" role="dialog" aria-modal="true" aria-labelledby="annotation-modal-title">
       <button class="annotation-modal-backdrop" data-action="close-modal" type="button" aria-label="Close annotation details"></button>
       <section class="annotation-modal-card">
         <div class="panel-header annotation-modal-header">
           <div>
-            <h3 id="annotation-modal-title">Lap Annotation Details</h3>
-            <span class="panel-subtitle">Annotations and flags for the selected lap</span>
+            <h3 id="annotation-modal-title">Lap ${selected ? escapeHtml(selected.lap_number) : ''} Details</h3>
+            <div class="panel-subtitle selected-lap-subtitle">
+              <span>${selected ? escapeHtml(selected.display_driver_name || selected.driver_name || 'Unknown driver') : 'No lap selected'}</span>
+              ${details ? details.flags.map((flag) => `<span class="status-pill">${escapeHtml(flag)}</span>`).join('') : ''}
+            </div>
           </div>
-          <div class="form-actions">
-            <button
-              class="button secondary"
-              data-action="open-modal"
-              data-kind="taggedIncident"
-              type="button"
-              ${Number.isInteger(selectedLapNumber) ? '' : 'disabled'}
-            >
-              Add Annotation
-            </button>
-            <button class="button ghost" data-action="close-modal" type="button">Close</button>
-          </div>
+          <button class="button ghost" data-action="close-modal" type="button">Close</button>
         </div>
-        ${renderSelectedLapDetails(viewModel)}
+        ${detailsContent}
       </section>
     </div>
   `;

@@ -459,6 +459,13 @@ tbody tr.is-selected {
   gap: 12px;
 }
 
+.selected-lap-subtitle {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
 .selected-lap-flags {
   display: flex;
   flex-wrap: wrap;
