@@ -23,6 +23,8 @@ import {
 } from './features/query/raceQueries.js';
 import { renderLapTable, updateSortIndicators, scrollToLap } from './features/table/lapTable.js';
 
+const isLocalEditingEnabled = import.meta.env.DEV;
+
 const refs = {
     appInitStatus: document.querySelector('#app-init-status'),
     heroActionsHost: document.querySelector('#hero-actions-host'),
@@ -218,6 +220,7 @@ async function initialize() {
         timelineView = mountTimelineView(refs.timelineContainer, {
             ...createAnnotationHandlers(),
             onSelectLap: handleLapSelectionByNumber,
+            isLocalEditingEnabled,
         });
     }
 
@@ -299,6 +302,11 @@ function wireEvents() {
 }
 
 function setupTabSwitching() {
+    const annotationsTabButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === 'annotations');
+    if (annotationsTabButton) {
+        annotationsTabButton.hidden = !isLocalEditingEnabled;
+    }
+
     refs.tabButtons.forEach((button) => {
         button.addEventListener('click', (event) => {
             const tabName = event.target.dataset.tab;

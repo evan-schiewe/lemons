@@ -5,6 +5,7 @@ export function mountTimelineView(container, handlers) {
         viewModel: null,
         editingJournalId: null,
         isComposerExpanded: false,
+        isLocalEditingEnabled: Boolean(handlers?.isLocalEditingEnabled),
     };
 
     container.addEventListener('submit', async (event) => {
@@ -44,6 +45,10 @@ export function mountTimelineView(container, handlers) {
         }
 
         const action = button.dataset.action;
+
+        if (!state.isLocalEditingEnabled && ['open-composer', 'edit-journal', 'delete-journal', 'close-composer', 'cancel-edit-journal'].includes(action)) {
+            return;
+        }
 
         if (action === 'edit-journal') {
             state.editingJournalId = button.dataset.id || null;
@@ -113,11 +118,13 @@ function renderCurrent(container, state) {
     container.innerHTML = `
         <div class="timeline-layout">
             <section class="timeline-entries">
-                ${renderTimelineEvents(viewModel.timelineEvents || [])}
+                ${renderTimelineEvents(viewModel.timelineEvents || [], state.isLocalEditingEnabled)}
             </section>
+            ${state.isLocalEditingEnabled ? `
             <aside class="timeline-composer-rail">
                 ${state.isComposerExpanded ? renderComposerExpanded(viewModel, editingJournal) : renderComposerCollapsed()}
             </aside>
+            ` : ''}
         </div>
     `;
 }
@@ -191,19 +198,19 @@ function renderJournalForm(viewModel, editingJournal) {
     `;
 }
 
-function renderTimelineEvents(events) {
+function renderTimelineEvents(events, isLocalEditingEnabled) {
     if (!events.length) {
         return '<div class="timeline-empty">No timeline events match the current filters.</div>';
     }
 
     return `
         <div class="timeline-list">
-            ${events.map((eventItem) => renderEventCard(eventItem)).join('')}
+            ${events.map((eventItem) => renderEventCard(eventItem, isLocalEditingEnabled)).join('')}
         </div>
     `;
 }
 
-function renderEventCard(eventItem) {
+function renderEventCard(eventItem, isLocalEditingEnabled) {
     const timeLabel = formatIsoTimestamp(eventItem.event_time_iso);
     const lapLabel = Number.isInteger(eventItem.lap_number)
         ? `Lap ${eventItem.lap_number}`
@@ -229,8 +236,8 @@ function renderEventCard(eventItem) {
                 </div>
                 <div class="timeline-card-actions">
                     ${Number.isInteger(eventItem.lap_number) ? `<button type="button" class="button ghost" data-action="jump-lap" data-lap-number="${eventItem.lap_number}">Jump to Lap</button>` : ''}
-                    ${isJournal ? `<button type="button" class="button ghost" data-action="edit-journal" data-id="${escapeHtml(eventItem.source_id)}">Edit</button>` : ''}
-                    ${isJournal ? `<button type="button" class="button ghost" data-action="delete-journal" data-id="${escapeHtml(eventItem.source_id)}">Delete</button>` : ''}
+                    ${isJournal && isLocalEditingEnabled ? `<button type="button" class="button ghost" data-action="edit-journal" data-id="${escapeHtml(eventItem.source_id)}">Edit</button>` : ''}
+                    ${isJournal && isLocalEditingEnabled ? `<button type="button" class="button ghost" data-action="delete-journal" data-id="${escapeHtml(eventItem.source_id)}">Delete</button>` : ''}
                 </div>
             </header>
             <h4 class="timeline-card-title">${escapeHtml(eventItem.title || 'Untitled Event')}</h4>
