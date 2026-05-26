@@ -15,6 +15,20 @@ const TABLE_CONFIG = {
         table: 'driver_stints',
         fields: ['race_id', 'driver_name', 'start_lap', 'end_lap', 'color', 'notes', 'created_at', 'updated_at'],
     },
+    journalEntry: {
+        table: 'journal_entries',
+        fields: [
+            'race_id',
+            'lap_number',
+            'event_time_iso',
+            'event_time_source',
+            'title',
+            'entry_text',
+            'color',
+            'created_at',
+            'updated_at',
+        ],
+    },
 };
 
 function ensurePositiveInteger(value, field) {
@@ -34,6 +48,28 @@ function validateAnnotationPayload(kind, payload) {
 
         if (payload.end_lap < payload.start_lap) {
             throw new Error('End lap must be greater than or equal to start lap.');
+        }
+    }
+
+    if (kind === 'journalEntry') {
+        const hasLap = Number.isInteger(payload.lap_number) && payload.lap_number > 0;
+        const hasEventTimeIso = typeof payload.event_time_iso === 'string' && payload.event_time_iso.trim().length > 0;
+
+        if (payload.lap_number != null && payload.lap_number !== '') {
+            ensurePositiveInteger(payload.lap_number, 'Lap');
+        }
+
+        if (!hasLap && !hasEventTimeIso) {
+            throw new Error('Journal entries require a lap number, a timestamp, or both.');
+        }
+
+        if (hasEventTimeIso && Number.isNaN(new Date(payload.event_time_iso).getTime())) {
+            throw new Error('Journal timestamp must be a valid date/time.');
+        }
+
+        const text = `${payload.entry_text ?? ''}`.trim();
+        if (!text) {
+            throw new Error('Journal entry text is required.');
         }
     }
 }
@@ -57,6 +93,11 @@ export function createAnnotationStore(db) {
             const record = {
                 ...payload,
                 id,
+                ...(kind === 'journalEntry'
+                    ? {
+                        event_time_source: payload.event_time_source || (payload.event_time_iso ? 'manual' : 'lap'),
+                    }
+                    : {}),
                 created_at: existing?.created_at || now,
                 updated_at: now,
             };

@@ -14,13 +14,15 @@
             Witness the citrus
           </p>
         </div>
-        <div class="hero-actions">
-          <label class="button primary" for="csv-input">Import CSV</label>
-          <input id="csv-input" type="file" accept=".csv,text/csv" multiple hidden />
-          <button id="export-json" class="button secondary" type="button">Export JSON</button>
-          <button id="export-sqlite" class="button secondary" type="button">Export SQLite</button>
-          <label class="button ghost" for="sqlite-input">Restore SQLite</label>
-          <input id="sqlite-input" type="file" accept=".sqlite,.db,application/x-sqlite3,application/vnd.sqlite3" hidden />
+        <div id="hero-actions-host">
+          <div id="data-actions" class="hero-actions">
+            <label class="button primary" for="csv-input">Import CSV</label>
+            <input id="csv-input" type="file" accept=".csv,text/csv" multiple hidden />
+            <button id="export-json" class="button secondary" type="button">Export JSON</button>
+            <button id="export-sqlite" class="button secondary" type="button">Export SQLite</button>
+            <label class="button ghost" for="sqlite-input">Restore SQLite</label>
+            <input id="sqlite-input" type="file" accept=".sqlite,.db,application/x-sqlite3,application/vnd.sqlite3" hidden />
+          </div>
         </div>
       </header>
 
@@ -30,6 +32,8 @@
           <div class="tab-switcher">
             <button class="tab-button active" data-tab="chart">Chart</button>
             <button class="tab-button" data-tab="annotations">Annotations</button>
+            <button class="tab-button" data-tab="timeline">Timeline</button>
+            <button id="data-tab-button" class="tab-button" data-tab="data" hidden>Data</button>
           </div>
           <div class="tab-content-wrapper">
             <div id="chart-tab" class="tab-content active">
@@ -142,6 +146,23 @@
                     <div id="annotation-helper-container" class="annotation-helper"></div>
                   </div>
                 </div>
+              </section>
+            </div>
+            <div id="timeline-tab" class="tab-content">
+              <section class="panel timeline-tab-panel sticky-content">
+                <div class="panel-header">
+                  <h2>Timeline</h2>
+                </div>
+                <div id="timeline-container" class="timeline-container"></div>
+              </section>
+            </div>
+            <div id="data-tab" class="tab-content">
+              <section class="panel data-tab-panel sticky-content">
+                <div class="panel-header">
+                  <h2>Data</h2>
+                  <span class="panel-subtitle">Import, export, and restore race data</span>
+                </div>
+                <div id="data-actions-slot"></div>
               </section>
             </div>
           </div>

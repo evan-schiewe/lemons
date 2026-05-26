@@ -118,7 +118,22 @@ CREATE TABLE IF NOT EXISTS driver_stints (
   updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS journal_entries (
+  id TEXT PRIMARY KEY,
+  race_id TEXT NOT NULL REFERENCES races(id) ON DELETE CASCADE,
+  lap_number INTEGER,
+  event_time_iso TEXT,
+  event_time_source TEXT NOT NULL DEFAULT 'lap',
+  title TEXT,
+  entry_text TEXT NOT NULL,
+  color TEXT NOT NULL DEFAULT '#7c3aed',
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_lap_notes_race_lap ON lap_notes (race_id, lap_number);
 CREATE INDEX IF NOT EXISTS idx_tagged_incidents_race_lap ON tagged_incidents (race_id, lap_number);
 CREATE INDEX IF NOT EXISTS idx_range_events_race_lap ON range_events (race_id, start_lap, end_lap);
 CREATE INDEX IF NOT EXISTS idx_driver_stints_race_lap ON driver_stints (race_id, start_lap, end_lap);
+CREATE INDEX IF NOT EXISTS idx_journal_entries_race_lap ON journal_entries (race_id, lap_number);
+CREATE INDEX IF NOT EXISTS idx_journal_entries_race_time ON journal_entries (race_id, event_time_iso);

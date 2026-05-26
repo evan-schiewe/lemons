@@ -8,12 +8,14 @@ import { renderSummaryCards } from './features/dashboard/summaryCards.js';
 import { exportAnnotationsFile } from './features/export/exportAnnotations.js';
 import { exportDatabaseFile } from './features/export/exportDb.js';
 import { importRace } from './features/import/importRace.js';
+import { mountTimelineView } from './features/timeline/timelineView.js';
 import {
     getDriverOptions,
     getLapSeries,
     getLapTableRows,
     getRaceSnapshot,
     getRaceAnnotations,
+    getRaceTimelineEvents,
     getRaceList,
     getSummary,
     updateRaceStartTime,
@@ -23,6 +25,9 @@ import {
 import { renderLapTable, updateSortIndicators, scrollToLap } from './features/table/lapTable.js';
 
 const refs = {
+    heroActionsHost: document.querySelector('#hero-actions-host'),
+    dataActions: document.querySelector('#data-actions'),
+    dataActionsSlot: document.querySelector('#data-actions-slot'),
     csvInput: document.querySelector('#csv-input'),
     sqliteInput: document.querySelector('#sqlite-input'),
     exportJson: document.querySelector('#export-json'),
@@ -40,6 +45,8 @@ const refs = {
     table: document.querySelector('table'),
     helperContainer: document.querySelector('#annotation-helper-container'),
     annotationPanelContainer: document.querySelector('#annotation-panel-container'),
+    timelineContainer: document.querySelector('#timeline-container'),
+    dataTabButton: document.querySelector('#data-tab-button'),
     tabButtons: document.querySelectorAll('.tab-button'),
     tabContents: document.querySelectorAll('.tab-content'),
     annotationSubtabButtons: document.querySelectorAll('.annotation-subtab-button'),
@@ -62,7 +69,9 @@ const state = {
         taggedIncidents: [],
         rangeEvents: [],
         driverStints: [],
+        journalEntries: [],
     },
+    currentTimelineEvents: [],
     helperMode: false,
     helperCurrentIndex: 0,
     helperAutoAdvance: false,
@@ -76,6 +85,7 @@ const charts = {
 // Placeholder for annotation helper - will be initialized when module is created
 let annotationHelper = null;
 let annotationPanel = null;
+let timelineView = null;
 
 function createAnnotationHandlers({ autoAdvanceOnSave = false } = {}) {
     return {
@@ -193,6 +203,13 @@ async function initialize() {
         annotationPanel = mountAnnotationPanel(refs.annotationPanelContainer, createAnnotationHandlers());
     }
 
+    if (refs.timelineContainer) {
+        timelineView = mountTimelineView(refs.timelineContainer, {
+            ...createAnnotationHandlers(),
+            onSelectLap: handleLapSelectionByNumber,
+        });
+    }
+
     wireEvents();
     await refreshRaceOptions();
     await refreshView();
@@ -305,9 +322,31 @@ function setupTabSwitching() {
 
     // Restore saved tab preference
     const savedTab = localStorage.getItem('activeTab') || 'chart';
-    const savedTabButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === savedTab);
+    const savedTabButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === savedTab && !btn.hidden);
     if (savedTabButton) {
         savedTabButton.click();
+    } else {
+        const chartTabButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === 'chart');
+        chartTabButton?.click();
+    }
+}
+
+function syncDataTabAndActions() {
+    const hasData = state.races.length > 0;
+
+    if (refs.dataTabButton) {
+        refs.dataTabButton.hidden = !hasData;
+    }
+
+    const activeDataButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === 'data' && btn.classList.contains('active'));
+    if (!hasData && activeDataButton) {
+        const chartButton = Array.from(refs.tabButtons).find((btn) => btn.dataset.tab === 'chart');
+        chartButton?.click();
+    }
+
+    const targetHost = hasData ? refs.dataActionsSlot : refs.heroActionsHost;
+    if (targetHost && refs.dataActions && refs.dataActions.parentElement !== targetHost) {
+        targetHost.append(refs.dataActions);
     }
 }
 
@@ -398,6 +437,7 @@ async function handleRestoreSqlite(event) {
 
 async function refreshRaceOptions() {
     state.races = getRaceList(state.db);
+    syncDataTabAndActions();
 
     refs.raceSelect.innerHTML = state.races.length
         ? state.races
@@ -437,7 +477,9 @@ async function refreshView() {
             taggedIncidents: [],
             rangeEvents: [],
             driverStints: [],
+            journalEntries: [],
         };
+        state.currentTimelineEvents = [];
         if (annotationHelper) {
             annotationHelper.render(null);
         }
@@ -451,8 +493,12 @@ async function refreshView() {
                     taggedIncidents: [],
                     rangeEvents: [],
                     driverStints: [],
+                    journalEntries: [],
                 },
             });
+        }
+        if (timelineView) {
+            timelineView.render(null);
         }
         return;
     }
@@ -462,9 +508,11 @@ async function refreshView() {
     const lapSeries = getLapSeries(state.db, state.activeRaceId, filters);
     const summary = getSummary(state.db, state.activeRaceId, filters);
     const annotations = getRaceAnnotations(state.db, state.activeRaceId);
+    const timelineEvents = getRaceTimelineEvents(state.db, state.activeRaceId, filters);
 
     state.currentRows = rows;
     state.currentAnnotations = annotations;
+    state.currentTimelineEvents = timelineEvents;
     if (state.selectedLapId && !rows.some((row) => row.id === state.selectedLapId)) {
         state.selectedLapId = '';
     }
@@ -515,6 +563,15 @@ async function refreshView() {
             rows,
             raceStartTime: activeRace?.race_start_time ?? null,
             annotations,
+        });
+    }
+
+    if (timelineView) {
+        timelineView.render({
+            timelineEvents,
+            journalEntries: annotations.journalEntries || [],
+            selectedLapRow,
+            raceStartTime: activeRace?.race_start_time ?? null,
         });
     }
 }

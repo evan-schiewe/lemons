@@ -150,9 +150,10 @@ export function getSummary(db, raceId, filters) {
         (SELECT COUNT(*) FROM lap_notes WHERE race_id = ?) AS lap_note_count,
         (SELECT COUNT(*) FROM tagged_incidents WHERE race_id = ?) AS incident_count,
         (SELECT COUNT(*) FROM range_events WHERE race_id = ?) AS range_event_count,
-        (SELECT COUNT(*) FROM driver_stints WHERE race_id = ?) AS stint_count
+        (SELECT COUNT(*) FROM driver_stints WHERE race_id = ?) AS stint_count,
+        (SELECT COUNT(*) FROM journal_entries WHERE race_id = ?) AS journal_count
     `,
-        [raceId, raceId, raceId, raceId],
+        [raceId, raceId, raceId, raceId, raceId],
     );
 
     return { ...aggregate, ...raceCounts };
@@ -176,7 +177,135 @@ export function getRaceAnnotations(db, raceId) {
             'SELECT * FROM driver_stints WHERE race_id = ? ORDER BY start_lap ASC, updated_at DESC',
             [raceId],
         ),
+        journalEntries: db.query(
+            'SELECT * FROM journal_entries WHERE race_id = ? ORDER BY COALESCE(event_time_iso, created_at) ASC, updated_at DESC',
+            [raceId],
+        ),
     };
+}
+
+export function getRaceTimelineEvents(db, raceId, filters = {}) {
+    if (!raceId) {
+        return [];
+    }
+
+    const race = db.queryOne('SELECT race_start_time FROM races WHERE id = ?', [raceId]);
+    const raceStartTimeIso = race?.race_start_time ?? null;
+    const annotations = getRaceAnnotations(db, raceId);
+    const laps = getRaceLapsWithOffsets(db, raceId);
+    const lapByNumber = new Map(laps.map((lap) => [lap.lap_number, lap]));
+
+    const lapNoteEvents = annotations.lapNotes.map((item) => {
+        const lap = lapByNumber.get(item.lap_number);
+        return buildTimelineEvent({
+            eventType: 'lapNote',
+            eventLabel: 'Lap Note',
+            sourceId: item.id,
+            lapNumber: item.lap_number,
+            driverName: item.driver_name || lap?.display_driver_name || lap?.driver_name || null,
+            title: item.driver_name ? `Note - ${item.driver_name}` : 'Lap Note',
+            body: item.note_text,
+            color: item.color || '#f59e0b',
+            createdAt: item.created_at,
+            updatedAt: item.updated_at,
+            raceStartTimeIso,
+            lapStartOffsetMs: lap?.lap_start_offset_ms,
+        });
+    });
+
+    const taggedIncidentEvents = annotations.taggedIncidents.map((item) => {
+        const lap = lapByNumber.get(item.lap_number);
+        return buildTimelineEvent({
+            eventType: 'taggedIncident',
+            eventLabel: 'Incident',
+            sourceId: item.id,
+            lapNumber: item.lap_number,
+            driverName: lap?.display_driver_name || lap?.driver_name || null,
+            title: item.title,
+            body: [item.tag, item.details].filter(Boolean).join(' - '),
+            color: item.color || '#d94f2b',
+            createdAt: item.created_at,
+            updatedAt: item.updated_at,
+            raceStartTimeIso,
+            lapStartOffsetMs: lap?.lap_start_offset_ms,
+        });
+    });
+
+    const rangeEvents = annotations.rangeEvents.flatMap((item) => {
+        const startLap = lapByNumber.get(item.start_lap);
+        const endLap = lapByNumber.get(item.end_lap);
+        const resolvedTitle = `${item.title ?? ''}`.trim() || 'Range Event';
+
+        const rangeStartEvent = buildTimelineEvent({
+            eventType: 'rangeEvent',
+            eventLabel: 'Range Event',
+            sourceId: item.id,
+            lapNumber: item.start_lap,
+            lapStart: item.start_lap,
+            lapEnd: item.end_lap,
+            driverName: null,
+            title: resolvedTitle,
+            body: [item.tag, item.details].filter(Boolean).join(' - '),
+            color: item.color || '#2563eb',
+            createdAt: item.created_at,
+            updatedAt: item.updated_at,
+            raceStartTimeIso,
+            lapStartOffsetMs: startLap?.lap_start_offset_ms,
+        });
+
+        const rangeEndEvent = buildTimelineEvent({
+            eventType: 'rangeEventEnd',
+            eventLabel: 'Range Event',
+            sourceId: `${item.id}:end`,
+            lapNumber: item.end_lap,
+            lapStart: item.end_lap,
+            lapEnd: item.end_lap,
+            driverName: null,
+            title: `End of ${resolvedTitle}`,
+            body: '',
+            color: item.color || '#2563eb',
+            createdAt: item.created_at,
+            updatedAt: item.updated_at,
+            raceStartTimeIso,
+            lapStartOffsetMs: endLap?.lap_start_offset_ms,
+        });
+
+        return [rangeStartEvent, rangeEndEvent];
+    });
+
+    const journalEvents = annotations.journalEntries.map((item) => {
+        const lap = Number.isInteger(item.lap_number) ? lapByNumber.get(item.lap_number) : null;
+        return buildTimelineEvent({
+            eventType: 'journalEntry',
+            eventLabel: 'Journal',
+            sourceId: item.id,
+            lapNumber: Number.isInteger(item.lap_number) ? item.lap_number : null,
+            driverName: lap?.display_driver_name || lap?.driver_name || null,
+            title: item.title || 'Journal Entry',
+            body: item.entry_text,
+            color: item.color || '#7c3aed',
+            createdAt: item.created_at,
+            updatedAt: item.updated_at,
+            explicitEventTimeIso: item.event_time_iso,
+            eventTimeSource: item.event_time_source || null,
+            raceStartTimeIso,
+            lapStartOffsetMs: lap?.lap_start_offset_ms,
+        });
+    });
+
+    const driverSwitchEvents = buildDriverSwitchTimelineEvents(laps, raceStartTimeIso);
+
+    const events = [
+        ...driverSwitchEvents,
+        ...lapNoteEvents,
+        ...taggedIncidentEvents,
+        ...rangeEvents,
+        ...journalEvents,
+    ];
+
+    return events
+        .filter((event) => timelineEventMatchesFilters(event, filters))
+        .sort(compareTimelineEvents);
 }
 
 /**
@@ -336,6 +465,215 @@ function buildLapStartIso(raceStartIso, lapStartOffsetMs) {
     }
 
     return new Date(raceStart.getTime() + lapStartOffsetMs).toISOString();
+}
+
+function getRaceLapsWithOffsets(db, raceId) {
+    return db.query(
+        `
+            SELECT
+                nl.*, 
+                ${resolvedDriverNameSql('nl')} AS display_driver_name,
+                COALESCE(
+                    SUM(COALESCE(nl.lap_time_ms, 0)) OVER (
+                        PARTITION BY nl.race_id
+                        ORDER BY nl.lap_number ASC
+                        ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                    ),
+                    0
+                ) AS lap_start_offset_ms
+            FROM normalized_laps nl
+            WHERE nl.race_id = ?
+            ORDER BY nl.lap_number ASC
+        `,
+        [raceId],
+    );
+}
+
+function buildDriverSwitchTimelineEvents(laps, raceStartTimeIso) {
+    const events = [];
+
+    for (let index = 1; index < laps.length; index += 1) {
+        const previous = laps[index - 1];
+        const current = laps[index];
+
+        const previousDriver = `${previous.display_driver_name ?? previous.driver_name ?? ''}`.trim();
+        const currentDriver = `${current.display_driver_name ?? current.driver_name ?? ''}`.trim();
+
+        if (!previousDriver || !currentDriver || previousDriver === currentDriver) {
+            continue;
+        }
+
+        events.push(
+            buildTimelineEvent({
+                eventType: 'driverSwitch',
+                eventLabel: 'Driver Switch',
+                sourceId: `${previous.id}:${current.id}`,
+                lapNumber: current.lap_number,
+                driverName: currentDriver,
+                oldDriverName: previousDriver,
+                newDriverName: currentDriver,
+                title: `${previousDriver} -> ${currentDriver}`,
+                body: `Driver swap at lap ${current.lap_number}`,
+                color: '#059669',
+                createdAt: current.updated_at || current.created_at || null,
+                updatedAt: current.updated_at || current.created_at || null,
+                raceStartTimeIso,
+                lapStartOffsetMs: current.lap_start_offset_ms,
+            }),
+        );
+    }
+
+    return events;
+}
+
+function buildTimelineEvent({
+    eventType,
+    eventLabel,
+    sourceId,
+    lapNumber = null,
+    lapStart = null,
+    lapEnd = null,
+    driverName = null,
+    oldDriverName = null,
+    newDriverName = null,
+    title = '',
+    body = '',
+    color = '#6b7280',
+    createdAt = null,
+    updatedAt = null,
+    explicitEventTimeIso = null,
+    eventTimeSource = null,
+    raceStartTimeIso = null,
+    lapStartOffsetMs = null,
+}) {
+    const lapDerivedIso = Number.isFinite(lapStartOffsetMs)
+        ? buildLapStartIso(raceStartTimeIso, lapStartOffsetMs)
+        : null;
+
+    const explicitIso = normalizeIso(explicitEventTimeIso);
+    const createdIso = normalizeIso(createdAt);
+    const effectiveEventTimeIso = explicitIso || lapDerivedIso || createdIso;
+    const resolvedEventTimeSource = explicitIso
+        ? 'manual'
+        : (eventTimeSource || (lapDerivedIso ? 'lap' : 'created'));
+
+    return {
+        id: `${eventType}:${sourceId}`,
+        event_type: eventType,
+        event_label: eventLabel,
+        source_id: sourceId,
+        lap_number: Number.isInteger(lapNumber) ? lapNumber : null,
+        lap_start: Number.isInteger(lapStart) ? lapStart : (Number.isInteger(lapNumber) ? lapNumber : null),
+        lap_end: Number.isInteger(lapEnd) ? lapEnd : (Number.isInteger(lapNumber) ? lapNumber : null),
+        driver_name: driverName || null,
+        old_driver_name: oldDriverName || null,
+        new_driver_name: newDriverName || null,
+        title: title || eventLabel,
+        body: body || '',
+        color,
+        event_time_iso: effectiveEventTimeIso,
+        event_time_source: resolvedEventTimeSource,
+        created_at: createdAt,
+        updated_at: updatedAt,
+    };
+}
+
+function normalizeIso(value) {
+    const trimmed = `${value ?? ''}`.trim();
+    if (!trimmed) {
+        return null;
+    }
+
+    const date = new Date(trimmed);
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+
+    return date.toISOString();
+}
+
+function timelineEventMatchesFilters(event, filters = {}) {
+    const lapMin = Number.isFinite(filters.lapMin) ? filters.lapMin : null;
+    const lapMax = Number.isFinite(filters.lapMax) ? filters.lapMax : null;
+
+    if (lapMin !== null || lapMax !== null) {
+        const startLap = Number.isInteger(event.lap_start) ? event.lap_start : null;
+        const endLap = Number.isInteger(event.lap_end) ? event.lap_end : startLap;
+
+        if (startLap === null || endLap === null) {
+            return false;
+        }
+
+        if (lapMin !== null && endLap < lapMin) {
+            return false;
+        }
+
+        if (lapMax !== null && startLap > lapMax) {
+            return false;
+        }
+    }
+
+    if (filters.driver) {
+        const eventDriver = `${event.driver_name ?? ''}`.trim();
+        if (!eventDriver || eventDriver !== filters.driver) {
+            return false;
+        }
+    }
+
+    const search = `${filters.search ?? ''}`.trim().toLowerCase();
+    if (search) {
+        const haystack = [
+            event.event_label,
+            event.event_type,
+            event.title,
+            event.body,
+            event.driver_name,
+            event.lap_number,
+            event.lap_start,
+            event.lap_end,
+        ]
+            .map((value) => `${value ?? ''}`.toLowerCase())
+            .join(' ');
+
+        if (!haystack.includes(search)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function compareTimelineEvents(left, right) {
+    const leftLap = Number.isInteger(left.lap_start) ? left.lap_start : Number.POSITIVE_INFINITY;
+    const rightLap = Number.isInteger(right.lap_start) ? right.lap_start : Number.POSITIVE_INFINITY;
+
+    if (leftLap === rightLap && Number.isFinite(leftLap)) {
+        const leftPriority = left.event_type === 'journalEntry' ? 0 : 1;
+        const rightPriority = right.event_type === 'journalEntry' ? 0 : 1;
+
+        if (leftPriority !== rightPriority) {
+            return leftPriority - rightPriority;
+        }
+    }
+
+    const leftTime = left.event_time_iso ? new Date(left.event_time_iso).getTime() : Number.POSITIVE_INFINITY;
+    const rightTime = right.event_time_iso ? new Date(right.event_time_iso).getTime() : Number.POSITIVE_INFINITY;
+
+    if (leftTime !== rightTime) {
+        return leftTime - rightTime;
+    }
+
+    if (leftLap !== rightLap) {
+        return leftLap - rightLap;
+    }
+
+    const leftCreated = left.created_at ? new Date(left.created_at).getTime() : Number.POSITIVE_INFINITY;
+    const rightCreated = right.created_at ? new Date(right.created_at).getTime() : Number.POSITIVE_INFINITY;
+    if (leftCreated !== rightCreated) {
+        return leftCreated - rightCreated;
+    }
+
+    return `${left.id}`.localeCompare(`${right.id}`);
 }
 
 function buildLapFilterSql(raceId, filters, alias = '', includeRaceId = true) {

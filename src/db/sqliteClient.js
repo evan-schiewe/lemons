@@ -32,6 +32,26 @@ export class SQLiteClient {
         if (!hasRaceStartTime) {
             database.run('ALTER TABLE races ADD COLUMN race_start_time TEXT');
         }
+
+        const hasJournalEntriesTable = this.tableExists(database, 'journal_entries');
+        if (!hasJournalEntriesTable) {
+            database.run(`
+                CREATE TABLE IF NOT EXISTS journal_entries (
+                    id TEXT PRIMARY KEY,
+                    race_id TEXT NOT NULL REFERENCES races(id) ON DELETE CASCADE,
+                    lap_number INTEGER,
+                    event_time_iso TEXT,
+                    event_time_source TEXT NOT NULL DEFAULT 'lap',
+                    title TEXT,
+                    entry_text TEXT NOT NULL,
+                    color TEXT NOT NULL DEFAULT '#7c3aed',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            `);
+            database.run('CREATE INDEX IF NOT EXISTS idx_journal_entries_race_lap ON journal_entries (race_id, lap_number)');
+            database.run('CREATE INDEX IF NOT EXISTS idx_journal_entries_race_time ON journal_entries (race_id, event_time_iso)');
+        }
     }
 
     queryDatabase(database, sql, params = []) {
