@@ -1,7 +1,30 @@
-import * as echarts from 'echarts';
+import * as echarts from 'echarts/core';
+import { LineChart, ScatterChart, CustomChart } from 'echarts/charts';
+import {
+    GridComponent,
+    TooltipComponent,
+    LegendComponent,
+    MarkAreaComponent,
+    DataZoomInsideComponent,
+    DataZoomSliderComponent,
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
 import { formatDurationMs } from '../../utils/time.js';
 import { formatGapDisplay } from '../../utils/time.js';
 import { formatNumber } from '../../utils/format.js';
+
+echarts.use([
+    LineChart,
+    ScatterChart,
+    CustomChart,
+    GridComponent,
+    TooltipComponent,
+    LegendComponent,
+    MarkAreaComponent,
+    DataZoomInsideComponent,
+    DataZoomSliderComponent,
+    CanvasRenderer,
+]);
 
 const PALETTE = ['#d94f2b', '#2563eb', '#059669', '#9d174d', '#7c3aed', '#0f766e'];
 const GAP_PALETTE = ['#7c3aed', '#0f766e', '#d97706', '#be123c', '#1d4ed8', '#059669'];

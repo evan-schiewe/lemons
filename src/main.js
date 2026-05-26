@@ -3,8 +3,6 @@ import { SQLiteClient } from './db/sqliteClient.js';
 import { mountAnnotationHelper } from './features/annotations/annotationHelperView.js';
 import { mountAnnotationPanel } from './features/annotations/annotationPanel.js';
 import { createAnnotationStore } from './features/annotations/annotationStore.js';
-import { createLapTimeChart } from './features/charts/lapTimeChart.js';
-import { renderSummaryCards } from './features/dashboard/summaryCards.js';
 import { exportAnnotationsFile } from './features/export/exportAnnotations.js';
 import { exportDatabaseFile } from './features/export/exportDb.js';
 import { importRace } from './features/import/importRace.js';
@@ -83,16 +81,50 @@ const state = {
 };
 
 const charts = {
-    lapTime: createLapTimeChart(document.querySelector('#lap-time-chart'), {
-        onSelectLap: handleLapSelectionByNumber,
-        onLapRangeChange: handleLapRangeZoom,
-    }),
+    lapTime: null,
 };
+
+let chartModulesPromise = null;
+let createLapTimeChart = null;
+let renderSummaryCards = null;
 
 // Placeholder for annotation helper - will be initialized when module is created
 let annotationHelper = null;
 let annotationPanel = null;
 let timelineView = null;
+
+async function ensureChartModules() {
+    if (!chartModulesPromise) {
+        chartModulesPromise = Promise.all([
+            import('./features/charts/lapTimeChart.js'),
+            import('./features/dashboard/summaryCards.js'),
+        ]).then(([lapTimeChartModule, summaryCardsModule]) => {
+            createLapTimeChart = lapTimeChartModule.createLapTimeChart;
+            renderSummaryCards = summaryCardsModule.renderSummaryCards;
+        });
+    }
+
+    await chartModulesPromise;
+}
+
+async function ensureLapTimeChart() {
+    if (charts.lapTime) {
+        return charts.lapTime;
+    }
+
+    await ensureChartModules();
+    charts.lapTime = createLapTimeChart(document.querySelector('#lap-time-chart'), {
+        onSelectLap: handleLapSelectionByNumber,
+        onLapRangeChange: handleLapRangeZoom,
+    });
+
+    return charts.lapTime;
+}
+
+async function renderSummaryCardsLazy(summary, lapRows, options) {
+    await ensureChartModules();
+    renderSummaryCards(refs.summaryCards, summary, lapRows, options);
+}
 
 function createAnnotationHandlers({ autoAdvanceOnSave = false } = {}) {
     return {
@@ -295,7 +327,7 @@ function wireEvents() {
         await selectLapAndOpenDetails(selectedRow);
     });
     window.addEventListener('resize', () => {
-        charts.lapTime.resize();
+        charts.lapTime?.resize();
     });
     setupTabSwitching();
     setupAnnotationSubtabs();
@@ -324,7 +356,7 @@ function setupTabSwitching() {
                 // Trigger chart resize if showing chart tab
                 if (tabName === 'chart') {
                     setTimeout(() => {
-                        charts.lapTime.resize();
+                        charts.lapTime?.resize();
                     }, 50);
                 }
             }
@@ -493,9 +525,7 @@ async function refreshView(options = {}) {
         state.lapRangeBounds = null;
         state.lapRangeRaceId = '';
         syncLapRangeInputs(null, { prefill: false });
-        renderSummaryCards(refs.summaryCards, null, [], {
-            greenFlagOnly: state.summaryGreenOnly,
-        });
+        refs.summaryCards.innerHTML = '<div class="summary-card"><span>No race selected</span><strong>Import a CSV</strong></div>';
         renderLapTable(refs.tableBody, [], state.selectedLapId, null);
         state.currentAnnotations = {
             lapNotes: [],
@@ -558,15 +588,16 @@ async function refreshView(options = {}) {
         state.selectedLapId = '';
     }
 
-    renderSummaryCards(refs.summaryCards, summary, rows, {
+    await renderSummaryCardsLazy(summary, rows, {
         greenFlagOnly: state.summaryGreenOnly,
     });
     const activeRace = state.races.find((race) => race.id === state.activeRaceId);
     renderLapTable(refs.tableBody, rows, state.selectedLapId, activeRace?.race_start_time ?? null);
 
     if (!skipChartRender) {
-        charts.lapTime.render(lapSeries, annotations);
-        charts.lapTime.setLapRange(filters.lapMin, filters.lapMax);
+        const lapTimeChart = await ensureLapTimeChart();
+        lapTimeChart.render(lapSeries, annotations);
+        lapTimeChart.setLapRange(filters.lapMin, filters.lapMax);
     }
     // BUG FIX: charts.position was initialized but render() was never defined. Skip for now.
     // charts.position.render(lapSeries, annotations, null);

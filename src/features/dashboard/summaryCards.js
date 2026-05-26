@@ -1,6 +1,16 @@
-import * as echarts from 'echarts';
+import * as echarts from 'echarts/core';
+import { BarChart } from 'echarts/charts';
+import { GridComponent, TooltipComponent } from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
 import { escapeHtml, formatNumber } from '../../utils/format.js';
 import { formatDurationMs, formatLapTimeHHMMSS } from '../../utils/time.js';
+
+echarts.use([
+    BarChart,
+    GridComponent,
+    TooltipComponent,
+    CanvasRenderer,
+]);
 
 let isHistogramExpanded = false;
 
