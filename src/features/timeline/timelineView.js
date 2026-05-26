@@ -151,7 +151,8 @@ function renderComposerExpanded(viewModel, editingJournal) {
 
 function renderJournalForm(viewModel, editingJournal) {
     const selectedLap = viewModel.selectedLapRow || null;
-    const defaultLapNumber = editingJournal?.lap_number ?? selectedLap?.lap_number ?? '';
+    // Do not auto-assign a lap for new journal entries.
+    const defaultLapNumber = editingJournal?.lap_number ?? '';
 
     const lapDerivedIso = selectedLap && Number.isFinite(selectedLap.lap_start_offset_ms)
         ? computeLapIso(viewModel.raceStartTime, selectedLap.lap_start_offset_ms)
@@ -208,7 +209,7 @@ function renderEventCard(eventItem) {
         ? `Lap ${eventItem.lap_number}`
         : (Number.isInteger(eventItem.lap_start) && Number.isInteger(eventItem.lap_end)
             ? `Laps ${eventItem.lap_start}-${eventItem.lap_end}`
-            : 'No lap reference');
+            : '');
 
     const isJournal = eventItem.event_type === 'journalEntry';
     const isDriverSwitch = eventItem.event_type === 'driverSwitch';

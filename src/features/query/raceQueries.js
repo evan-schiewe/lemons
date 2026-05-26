@@ -589,15 +589,18 @@ function timelineEventMatchesFilters(event, filters = {}) {
         const endLap = Number.isInteger(event.lap_end) ? event.lap_end : startLap;
 
         if (startLap === null || endLap === null) {
-            return false;
-        }
+            // Keep valid manual/no-lap journal entries visible in timeline.
+            if (event.event_type !== 'journalEntry') {
+                return false;
+            }
+        } else {
+            if (lapMin !== null && endLap < lapMin) {
+                return false;
+            }
 
-        if (lapMin !== null && endLap < lapMin) {
-            return false;
-        }
-
-        if (lapMax !== null && startLap > lapMax) {
-            return false;
+            if (lapMax !== null && startLap > lapMax) {
+                return false;
+            }
         }
     }
 

@@ -541,7 +541,7 @@ async function refreshView(options = {}) {
     const rows = getLapTableRows(state.db, state.activeRaceId, filters, state.sort);
     const summary = getSummary(state.db, state.activeRaceId, filters);
     const annotations = getRaceAnnotations(state.db, state.activeRaceId);
-    const timelineEvents = getRaceTimelineEvents(state.db, state.activeRaceId, filters);
+    const timelineEvents = getRaceTimelineEvents(state.db, state.activeRaceId);
 
     state.currentRows = rows;
     state.currentAnnotations = annotations;
