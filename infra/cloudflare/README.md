@@ -85,12 +85,13 @@ GitHub manually.
 Use the signing secret that was applied to the Worker:
 
 ```bash
-mise run sync-edit-link
+mise run sync-edit-link alice@example.com
 ```
 
 The task reads `token_signing_secret` from `infra/cloudflare/terraform.tfvars`
 with `tofu console`, then creates a link for the `APP_URL` configured in
-`mise.toml`. Set `TOKEN_SIGNING_SECRET` to override the secret source.
+`mise.toml`. Set `TOKEN_SIGNING_SECRET` to override the secret source. Pass
+`--app-url` to override the configured app URL.
 
 For custom subjects, workspaces, scopes, or app URLs, call the script directly:
 

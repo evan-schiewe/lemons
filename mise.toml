@@ -93,7 +93,36 @@ run = [
 
 [tasks.sync-edit-link]
 description = "Create a collaborative edit link"
+usage = '''
+arg "<sub>" help="Token subject"
+flag "--app-url <url>" help="App URL for generated edit link" env="APP_URL"
+flag "--days <days>" help="Token lifetime in days" default="28"
+flag "--workspace <workspace>" help="Workspace id" default="main"
+flag "--scope <scope>" help="Comma-separated token scopes" default="annotations:read,annotations:write,races:read,races:write"
+flag "--races <races>" help="Comma-separated race allowlist" default="*"
+flag "--jti <jti>" help="Token id"
+'''
 run = '''
-TOKEN_SIGNING_SECRET="${TOKEN_SIGNING_SECRET:-$(printf "%s\n" "nonsensitive(var.token_signing_secret)" | tofu -chdir=infra/cloudflare console | sed "s/^\"//; s/\"$//")}" \
-  node cloudflare/worker/create-token.mjs --sub alice@example.com --app-url $APP_URL
+#!/usr/bin/env bash
+set -euo pipefail
+
+TOKEN_SIGNING_SECRET="${TOKEN_SIGNING_SECRET:-$(printf "%s\n" "nonsensitive(var.token_signing_secret)" | tofu -chdir=infra/cloudflare console | sed "s/^\"//; s/\"$//")}"
+export TOKEN_SIGNING_SECRET
+
+app_url="${usage_app_url:-${APP_URL:?APP_URL is required unless --app-url is provided}}"
+
+args=(
+  --sub "${usage_sub?}"
+  --app-url "$app_url"
+  --days "${usage_days?}"
+  --workspace "${usage_workspace?}"
+  --scope "${usage_scope?}"
+  --races "${usage_races?}"
+)
+
+if [[ -n "${usage_jti:-}" ]]; then
+  args+=(--jti "$usage_jti")
+fi
+
+node cloudflare/worker/create-token.mjs "${args[@]}"
 '''

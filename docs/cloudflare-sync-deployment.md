@@ -109,8 +109,7 @@ After variables are configured, push to `main` and let the existing GitHub Pages
 Use the same signing secret configured as `token_signing_secret`:
 
 ```bash
-mise run sync-edit-link -- \
-  --sub alice@example.com \
+mise run sync-edit-link alice@example.com \
   --app-url https://<github-owner>.github.io/lemons/
 ```
 
@@ -237,8 +236,7 @@ VITE_SYNC_API_BASE='https://lemons-sync-api.<subdomain>.workers.dev' pnpm dev
 Then open a generated edit link using the local app URL:
 
 ```bash
-mise run sync-edit-link -- \
-  --sub dev@example.com \
+mise run sync-edit-link dev@example.com \
   --app-url http://127.0.0.1:5173/lemons/
 ```
 
