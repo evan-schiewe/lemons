@@ -880,10 +880,16 @@ tbody tr.is-selected {
 }
 
 .timeline-card-time,
-.timeline-card-lap,
-.timeline-card-driver {
+.timeline-card-lap {
   font-size: 0.82rem;
   color: #6b5d4d;
+}
+
+.timeline-card-driver,
+.timeline-card-driver-switch-inline {
+  font-size: 0.82rem;
+  color: #0f5132;
+  font-weight: 600;
 }
 
 .timeline-card-actions {
@@ -917,12 +923,6 @@ tbody tr.is-selected {
 
 .timeline-card-driver-switch .timeline-card-header {
   align-items: center;
-}
-
-.timeline-card-driver-switch-inline {
-  font-size: 0.82rem;
-  color: #0f5132;
-  font-weight: 600;
 }
 
 .timeline-empty {
