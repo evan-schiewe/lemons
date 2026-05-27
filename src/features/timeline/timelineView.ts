@@ -19,7 +19,20 @@ interface TimelineState {
   editingJournalId: string | null;
   isComposerExpanded: boolean;
   isLocalEditingEnabled: boolean;
+  bandResizeObserver: ResizeObserver | null;
 }
+
+type TimelineDayPhase = 'day' | 'twilight' | 'night' | 'unknown';
+
+const TIMELINE_DAY_BAND_FALLBACK = 'var(--timeline-day-blue)';
+const TIMELINE_DAY_BLUE = [31, 126, 208] as const;
+const TIMELINE_SUNSET_ORANGE = [239, 125, 33] as const;
+const TIMELINE_NIGHT_BLACK = [8, 10, 13] as const;
+const FIRST_LIGHT_MINUTES = 5 * 60 + 16;
+const SUNRISE_MINUTES = 5 * 60 + 47;
+const SUNSET_MINUTES = 20 * 60 + 23;
+const LAST_LIGHT_MINUTES = 20 * 60 + 54;
+const MIN_TWILIGHT_STOP_SEPARATION_PERCENT = 1.2;
 
 export function mountTimelineView(
   container: HTMLElement,
@@ -30,6 +43,7 @@ export function mountTimelineView(
     editingJournalId: null,
     isComposerExpanded: false,
     isLocalEditingEnabled: Boolean(handlers?.isLocalEditingEnabled),
+    bandResizeObserver: null,
   };
 
   container.addEventListener('submit', async (event: SubmitEvent) => {
@@ -154,6 +168,7 @@ export function mountTimelineView(
 function renderCurrent(container: HTMLElement, state: TimelineState): void {
   const viewModel = state.viewModel;
   if (!viewModel) {
+    resetTimelineBandObserver(state);
     container.innerHTML =
       '<div class="timeline-empty">Load a race to view the event timeline.</div>';
     return;
@@ -181,6 +196,8 @@ function renderCurrent(container: HTMLElement, state: TimelineState): void {
             }
         </div>
     `;
+
+  observeTimelineBand(container, state);
 }
 
 function renderComposerCollapsed(): string {
@@ -263,15 +280,401 @@ function renderTimelineEvents(
   events: TimelineEvent[],
   isLocalEditingEnabled: boolean,
 ): string {
+  const bandStyle = `--timeline-day-night-band: ${TIMELINE_DAY_BAND_FALLBACK};`;
+
   if (!events.length) {
-    return '<div class="timeline-empty">No timeline events match the current filters.</div>';
+    return `
+        <div class="timeline-list timeline-list-empty" style="${escapeHtml(bandStyle)}">
+            <div class="timeline-empty">No timeline events match the current filters.</div>
+        </div>
+    `;
   }
 
   return `
-        <div class="timeline-list">
+        <div class="timeline-list" style="${escapeHtml(bandStyle)}">
             ${events.map((eventItem) => renderEventCard(eventItem, isLocalEditingEnabled)).join('')}
         </div>
     `;
+}
+
+function getTimelineBandColor(eventTimeIso: string | null | undefined): string {
+  const eventDate = parseIsoDate(eventTimeIso);
+  if (!eventDate) {
+    return TIMELINE_DAY_BAND_FALLBACK;
+  }
+
+  const eventMinutes = getDateMinutes(eventDate);
+  if (eventMinutes < FIRST_LIGHT_MINUTES) {
+    return `rgb(${TIMELINE_NIGHT_BLACK.join(' ')})`;
+  }
+
+  if (eventMinutes < SUNRISE_MINUTES) {
+    return mixTimelineBandColor(
+      TIMELINE_SUNSET_ORANGE,
+      TIMELINE_DAY_BLUE,
+      normalizeRange(eventMinutes, FIRST_LIGHT_MINUTES, SUNRISE_MINUTES),
+    );
+  }
+
+  if (eventMinutes < SUNSET_MINUTES) {
+    return `rgb(${TIMELINE_DAY_BLUE.join(' ')})`;
+  }
+
+  if (eventMinutes < LAST_LIGHT_MINUTES) {
+    return mixTimelineBandColor(
+      TIMELINE_SUNSET_ORANGE,
+      TIMELINE_NIGHT_BLACK,
+      normalizeRange(eventMinutes, SUNSET_MINUTES, LAST_LIGHT_MINUTES),
+    );
+  }
+
+  return `rgb(${TIMELINE_NIGHT_BLACK.join(' ')})`;
+}
+
+function getTimelineBandMinutes(
+  eventTimeIso: string | null | undefined,
+): string {
+  const eventDate = parseIsoDate(eventTimeIso);
+  return eventDate ? `${getDateMinutes(eventDate)}` : '';
+}
+
+function getTimelineDayPhase(
+  eventTimeIso: string | null | undefined,
+): TimelineDayPhase {
+  const eventDate = parseIsoDate(eventTimeIso);
+  if (!eventDate) {
+    return 'unknown';
+  }
+
+  const eventMinutes = getDateMinutes(eventDate);
+  if (
+    eventMinutes < FIRST_LIGHT_MINUTES ||
+    eventMinutes >= LAST_LIGHT_MINUTES
+  ) {
+    return 'night';
+  }
+
+  if (eventMinutes < SUNRISE_MINUTES || eventMinutes >= SUNSET_MINUTES) {
+    return 'twilight';
+  }
+
+  return 'day';
+}
+
+function parseTimelineDayPhase(
+  value: string | null | undefined,
+): TimelineDayPhase {
+  return value === 'day' || value === 'twilight' || value === 'night'
+    ? value
+    : 'unknown';
+}
+
+function getDateMinutes(date: Date): number {
+  return date.getHours() * 60 + date.getMinutes();
+}
+
+function parseIsoDate(value: string | null | undefined): Date | null {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return date;
+}
+
+function formatGradientPercent(value: number): string {
+  const clamped = Math.max(0, Math.min(100, value));
+  return clamped.toFixed(3).replace(/\.?0+$/, '');
+}
+
+function observeTimelineBand(
+  container: HTMLElement,
+  state: TimelineState,
+): void {
+  resetTimelineBandObserver(state);
+
+  const list = container.querySelector<HTMLElement>('.timeline-list');
+  if (!list) {
+    return;
+  }
+
+  syncTimelineBandToCardPositions(list);
+
+  const observer = new ResizeObserver(() => {
+    syncTimelineBandToCardPositions(list);
+  });
+  observer.observe(list);
+  list.querySelectorAll<HTMLElement>('.timeline-card').forEach((card) => {
+    observer.observe(card);
+  });
+  state.bandResizeObserver = observer;
+
+  requestAnimationFrame(() => {
+    syncTimelineBandToCardPositions(list);
+  });
+}
+
+function resetTimelineBandObserver(state: TimelineState): void {
+  state.bandResizeObserver?.disconnect();
+  state.bandResizeObserver = null;
+}
+
+function syncTimelineBandToCardPositions(list: HTMLElement): void {
+  const cards = Array.from(
+    list.querySelectorAll<HTMLElement>('.timeline-card'),
+  );
+  if (!cards.length) {
+    return;
+  }
+
+  const listRect = list.getBoundingClientRect();
+  if (!Number.isFinite(listRect.height) || listRect.height <= 0) {
+    return;
+  }
+
+  const cardStops = cards.map((card) => {
+    const cardRect = card.getBoundingClientRect();
+    const cardCenter = cardRect.top + cardRect.height / 2;
+    const position = ((cardCenter - listRect.top) / listRect.height) * 100;
+
+    return {
+      color: card.dataset.timelineBandColor || TIMELINE_DAY_BAND_FALLBACK,
+      minutes: Number.parseFloat(card.dataset.timelineBandMinutes || ''),
+      phase: parseTimelineDayPhase(card.dataset.timelineDayPhase),
+      position: formatGradientPercent(position),
+      rawPosition: Math.max(0, Math.min(100, position)),
+    };
+  });
+
+  const firstColor = cardStops[0].color;
+  const lastColor = cardStops[cardStops.length - 1].color;
+  if (cardStops.length === 1) {
+    list.style.setProperty(
+      '--timeline-day-night-band',
+      `linear-gradient(180deg, ${firstColor} 0%, ${firstColor} 100%)`,
+    );
+    return;
+  }
+
+  const stops = [
+    `${firstColor} 0%`,
+    ...buildMeasuredTimelineBandStops(cardStops),
+    `${lastColor} 100%`,
+  ];
+
+  list.style.setProperty(
+    '--timeline-day-night-band',
+    `linear-gradient(180deg, ${stops.join(', ')})`,
+  );
+}
+
+function buildMeasuredTimelineBandStops(
+  cardStops: Array<{
+    color: string;
+    minutes: number;
+    phase: TimelineDayPhase;
+    position: string;
+    rawPosition: number;
+  }>,
+): string[] {
+  const stops: string[] = [];
+  for (let index = 0; index < cardStops.length; index += 1) {
+    if (index > 0) {
+      stops.push(
+        ...buildSyntheticTwilightStops(cardStops[index - 1], cardStops[index]),
+      );
+    }
+
+    stops.push(`${cardStops[index].color} ${cardStops[index].position}%`);
+  }
+
+  return stops;
+}
+
+function buildSyntheticTwilightStops(
+  previous: {
+    minutes: number;
+    phase: TimelineDayPhase;
+    rawPosition: number;
+  },
+  next: {
+    minutes: number;
+    phase: TimelineDayPhase;
+    rawPosition: number;
+  },
+): string[] {
+  if (!Number.isFinite(previous.minutes) || !Number.isFinite(next.minutes)) {
+    return [];
+  }
+
+  if (next.rawPosition <= previous.rawPosition) {
+    return [];
+  }
+
+  if (previous.phase === 'day' && next.phase === 'day') {
+    return [];
+  }
+
+  return [
+    ...buildTwilightBoundaryStops(previous, next, SUNSET_MINUTES),
+    ...buildTwilightBoundaryStops(previous, next, FIRST_LIGHT_MINUTES),
+  ].sort((left, right) => {
+    const leftPosition = Number.parseFloat(left.split(' ').at(-1) ?? '0');
+    const rightPosition = Number.parseFloat(right.split(' ').at(-1) ?? '0');
+    return leftPosition - rightPosition;
+  });
+}
+
+function buildTwilightBoundaryStops(
+  previous: {
+    minutes: number;
+    rawPosition: number;
+  },
+  next: {
+    minutes: number;
+    rawPosition: number;
+  },
+  boundaryMinutes: number,
+): string[] {
+  if (
+    !timeRangeCrossesBoundary(previous.minutes, next.minutes, boundaryMinutes)
+  ) {
+    return [];
+  }
+
+  const position = interpolateBoundaryPosition(previous, next, boundaryMinutes);
+  if (!Number.isFinite(position)) {
+    return [];
+  }
+
+  const constrainedPosition = clamp(
+    position,
+    previous.rawPosition + MIN_TWILIGHT_STOP_SEPARATION_PERCENT,
+    next.rawPosition - MIN_TWILIGHT_STOP_SEPARATION_PERCENT,
+  );
+  if (
+    constrainedPosition <= previous.rawPosition ||
+    constrainedPosition >= next.rawPosition
+  ) {
+    return [];
+  }
+
+  return [
+    `rgb(${TIMELINE_SUNSET_ORANGE.join(' ')}) ${formatGradientPercent(constrainedPosition)}%`,
+  ];
+}
+
+function timeRangeCrossesBoundary(
+  previousMinutes: number,
+  nextMinutes: number,
+  boundaryMinutes: number,
+): boolean {
+  if (nextMinutes >= previousMinutes) {
+    return previousMinutes < boundaryMinutes && nextMinutes > boundaryMinutes;
+  }
+
+  return previousMinutes < boundaryMinutes || nextMinutes > boundaryMinutes;
+}
+
+function interpolateBoundaryPosition(
+  previous: {
+    minutes: number;
+    rawPosition: number;
+  },
+  next: {
+    minutes: number;
+    rawPosition: number;
+  },
+  boundaryMinutes: number,
+): number {
+  const nextMinutes =
+    next.minutes >= previous.minutes ? next.minutes : next.minutes + 24 * 60;
+  const normalizedBoundary =
+    boundaryMinutes > previous.minutes
+      ? boundaryMinutes
+      : boundaryMinutes + 24 * 60;
+  const progress = normalizeRange(
+    normalizedBoundary,
+    previous.minutes,
+    nextMinutes,
+  );
+
+  return (
+    previous.rawPosition + (next.rawPosition - previous.rawPosition) * progress
+  );
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, value));
+}
+
+function normalizeRange(value: number, min: number, max: number): number {
+  const span = max - min;
+  if (span <= 0) {
+    return 0;
+  }
+
+  return (value - min) / span;
+}
+
+function mixTimelineBandColor(
+  from: readonly [number, number, number],
+  to: readonly [number, number, number],
+  amount: number,
+): string {
+  const clampedAmount = Math.max(0, Math.min(1, amount));
+  const channels = from.map((channel, index) =>
+    Math.round(channel + (to[index] - channel) * clampedAmount),
+  );
+
+  return `rgb(${channels.join(' ')})`;
+}
+
+function renderTimelineDayPhaseIcon(
+  eventTimeIso: string | null | undefined,
+): string {
+  const phase = getTimelineDayPhase(eventTimeIso);
+  if (phase === 'unknown') {
+    return '';
+  }
+
+  const label =
+    phase === 'day'
+      ? 'Daytime'
+      : phase === 'twilight'
+        ? 'Twilight'
+        : 'Nighttime';
+
+  return `
+            <span class="timeline-day-phase-icon timeline-day-phase-icon-${phase}" role="img" aria-label="${label}">
+                ${renderTimelineDayPhaseSvg(phase)}
+            </span>`;
+}
+
+function renderTimelineDayPhaseSvg(
+  phase: Exclude<TimelineDayPhase, 'unknown'>,
+): string {
+  if (phase === 'day') {
+    return `
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <circle cx="12" cy="12" r="4" />
+                    <path d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77" />
+                </svg>`;
+  }
+
+  if (phase === 'twilight') {
+    return `
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M4 17h16" />
+                    <path d="M7 17a5 5 0 0 1 10 0" />
+                    <path d="M12 5v3M5.64 8.64l2.12 2.12M18.36 8.64l-2.12 2.12" />
+                </svg>`;
+  }
+
+  return `
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M20 14.5A8 8 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z" />
+                </svg>`;
 }
 
 function renderEventCard(
@@ -293,8 +696,14 @@ function renderEventCard(
     return renderDriverSwitchCard(eventItem, timeLabel, lapLabel);
   }
 
+  const bandColor = getTimelineBandColor(eventItem.event_time_iso);
+  const bandMinutes = getTimelineBandMinutes(eventItem.event_time_iso);
+  const phase = getTimelineDayPhase(eventItem.event_time_iso);
+  const phaseIcon = renderTimelineDayPhaseIcon(eventItem.event_time_iso);
+
   return `
-        <article class="timeline-card" style="--event-color: ${escapeHtml(eventItem.color || ANNOTATION_COLOR_TOKENS.fallback)}">
+        <article class="timeline-card" data-timeline-band-color="${escapeHtml(bandColor)}" data-timeline-band-minutes="${escapeHtml(bandMinutes)}" data-timeline-day-phase="${phase}" style="--event-color: ${escapeHtml(eventItem.color || ANNOTATION_COLOR_TOKENS.fallback)};">
+            ${phaseIcon}
             <header class="timeline-card-header">
                 <div class="timeline-card-meta">
                     <span class="timeline-card-badge">${escapeHtml(eventItem.event_label || eventItem.event_type)}</span>
@@ -322,13 +731,18 @@ function renderDriverSwitchCard(
   const oldDriverName = `${eventItem.old_driver_name ?? ''}`.trim();
   const newDriverName =
     `${eventItem.new_driver_name ?? eventItem.driver_name ?? ''}`.trim();
+  const bandColor = getTimelineBandColor(eventItem.event_time_iso);
+  const bandMinutes = getTimelineBandMinutes(eventItem.event_time_iso);
+  const phase = getTimelineDayPhase(eventItem.event_time_iso);
+  const phaseIcon = renderTimelineDayPhaseIcon(eventItem.event_time_iso);
   const driverTransition =
     oldDriverName && newDriverName
       ? `${oldDriverName} -> ${newDriverName}`
       : newDriverName || oldDriverName || 'Driver updated';
 
   return `
-        <article class="timeline-card timeline-card-driver-switch" style="--event-color: ${escapeHtml(eventItem.color || ANNOTATION_COLOR_TOKENS.driverStint)}">
+        <article class="timeline-card timeline-card-driver-switch" data-timeline-band-color="${escapeHtml(bandColor)}" data-timeline-band-minutes="${escapeHtml(bandMinutes)}" data-timeline-day-phase="${phase}" style="--event-color: ${escapeHtml(eventItem.color || ANNOTATION_COLOR_TOKENS.driverStint)};">
+            ${phaseIcon}
             <header class="timeline-card-header">
                 <div class="timeline-card-meta">
                     <span class="timeline-card-badge">${escapeHtml(eventItem.event_label || eventItem.event_type)}</span>

@@ -58,6 +58,9 @@
   --color-danger-rgb: 180 35 24;
   --color-focus-ring: rgb(var(--brand-green-rgb) / 0.45);
   --color-link: var(--brand-green);
+  --timeline-day-blue: #1f7ed0;
+  --timeline-sunset-orange: #ef7d21;
+  --timeline-night-black: #080a0d;
   --surface-card-gradient: linear-gradient(
     180deg,
     rgb(var(--white-rgb) / 0.88),
@@ -883,7 +886,7 @@ tbody tr.is-selected {
 
 .timeline-tab-panel {
   padding: 0;
-  overflow-x: clip;
+  overflow: visible;
 }
 
 .timeline-container {
@@ -906,23 +909,24 @@ tbody tr.is-selected {
 }
 
 .timeline-composer-rail {
-  position: sticky;
-  top: 20px;
-  margin-top: -56px;
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  top: auto;
+  margin-top: 0;
   display: flex;
   justify-content: flex-end;
-  align-self: start;
   height: max-content;
-  z-index: 3;
+  z-index: 20;
+  pointer-events: none;
 }
 
 .timeline-composer {
   width: min(380px, calc(100vw - 52px));
   padding: 14px;
-  position: sticky;
-  top: 20px;
-  max-height: calc(100vh - 40px);
+  max-height: calc(100vh - 56px);
   overflow: auto;
+  pointer-events: auto;
 }
 
 .timeline-composer-header {
@@ -948,9 +952,10 @@ tbody tr.is-selected {
   color: var(--color-accent-contrast);
   text-align: center;
   cursor: pointer;
+  pointer-events: auto;
   box-shadow:
     inset 0 -3px 0 var(--color-highlight),
-    0 12px 26px var(--color-shadow-strong);
+    0 14px 34px rgb(var(--brand-black-rgb) / 0.28);
 }
 
 .timeline-composer-toggle-icon {
@@ -977,17 +982,80 @@ tbody tr.is-selected {
 .timeline-list {
   display: grid;
   gap: 12px;
+  position: relative;
+  padding-left: 28px;
+  --timeline-band-width: 6px;
+  --timeline-phase-icon-size: 22px;
+  --timeline-phase-icon-offset: -36px;
+}
+
+.timeline-list::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: var(--timeline-band-width);
+  border-radius: 999px;
+  background: var(--timeline-day-night-band, var(--timeline-day-blue));
+  box-shadow: 0 0 0 1px rgb(var(--brand-black-rgb) / 0.08);
+}
+
+.timeline-list-empty {
+  min-height: 80px;
 }
 
 .timeline-card {
   display: grid;
   gap: 0px;
   padding: 12px;
+  position: relative;
   border-radius: 14px;
   border: 1px solid var(--color-border);
-  border-left: 5px solid var(--event-color);
   background: var(--color-surface-card);
   min-width: 0;
+}
+
+.timeline-day-phase-icon {
+  position: absolute;
+  top: 50%;
+  left: var(--timeline-phase-icon-offset);
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--timeline-phase-icon-size);
+  height: var(--timeline-phase-icon-size);
+  border-radius: 999px;
+  border: 1px solid rgb(var(--brand-black-rgb) / 0.18);
+  background: rgb(var(--color-surface-rgb) / 0.96);
+  box-shadow:
+    0 0 0 2px rgb(var(--color-surface-rgb) / 0.72),
+    0 2px 8px rgb(var(--brand-black-rgb) / 0.16);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.timeline-day-phase-icon svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.timeline-day-phase-icon-day {
+  color: var(--timeline-day-blue);
+}
+
+.timeline-day-phase-icon-twilight {
+  color: var(--timeline-sunset-orange);
+}
+
+.timeline-day-phase-icon-night {
+  color: var(--timeline-night-black);
 }
 
 .timeline-card-header {
@@ -1010,7 +1078,9 @@ tbody tr.is-selected {
   font-weight: 700;
   padding: 4px 8px;
   border-radius: 999px;
-  background: rgb(var(--brand-black-rgb) / 0.08);
+  background: var(--event-color);
+  color: var(--color-accent-contrast);
+  box-shadow: inset 0 0 0 1px rgb(var(--brand-black-rgb) / 0.12);
 }
 
 .timeline-card-time,
@@ -1073,7 +1143,7 @@ tbody tr.is-selected {
   }
 
   .timeline-layout {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 
@@ -1110,18 +1180,14 @@ tbody tr.is-selected {
   }
 
   .timeline-composer-rail {
-    position: fixed;
     right: 16px;
     bottom: 18px;
-    top: auto;
-    margin-top: 0;
   }
 
   .timeline-composer {
     width: min(420px, calc(100vw - 32px));
     max-height: min(78vh, 680px);
     overflow: auto;
-    position: static;
   }
 }
 
