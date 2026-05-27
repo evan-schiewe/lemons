@@ -1,0 +1,31 @@
+# Copy this file to mise.local.toml and replace the placeholder commands with
+# whatever local secret-loading workflow you use on this machine.
+
+# R2 S3 backend credentials for OpenTofu's S3 backend.
+# [env.AWS_ACCESS_KEY_ID]
+# value = """
+# {{exec(
+#     command='your-r2-access-key-command',
+#     cache_key='r2_backend_access_key_id',
+#     cache_duration='8h'
+# )}}"""
+# redact = true
+#
+# [env.AWS_SECRET_ACCESS_KEY]
+# value = """
+# {{exec(
+#     command='your-r2-secret-key-command',
+#     cache_key='r2_backend_secret_access_key',
+#     cache_duration='8h'
+# )}}"""
+# redact = true
+
+# Cloudflare provider token for OpenTofu.
+# [env.CLOUDFLARE_API_TOKEN]
+# value = """
+# {{exec(
+#     command='your-cloudflare-token-command',
+#     cache_key='cloudflare_api_token',
+#     cache_duration='8h'
+# )}}"""
+# redact = true

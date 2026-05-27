@@ -23,6 +23,10 @@
             <label class="button ghost" for="sqlite-input">Restore SQLite</label>
             <input id="sqlite-input" type="file" accept=".sqlite,.db,application/x-sqlite3,application/vnd.sqlite3" hidden />
           </div>
+          <div id="sync-controls" class="sync-controls" hidden>
+            <span id="sync-status" class="status-pill">Local only</span>
+            <button id="sync-connect" class="button ghost" type="button" hidden>Connect Cloud Sync</button>
+          </div>
         </div>
       </header>
 

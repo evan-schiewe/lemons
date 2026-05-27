@@ -3,6 +3,7 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -16,6 +17,9 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      VITE_SYNC_API_BASE: ${{ vars.VITE_SYNC_API_BASE }}
+      VITE_SYNC_READ_ONLY: ${{ vars.VITE_SYNC_READ_ONLY }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6

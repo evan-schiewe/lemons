@@ -9,6 +9,9 @@ export interface AppRefs {
   sqliteInput: HTMLInputElement;
   exportJson: HTMLButtonElement;
   exportSqlite: HTMLButtonElement;
+  syncControls: HTMLElement;
+  syncStatus: HTMLElement;
+  syncConnect: HTMLButtonElement;
   raceSelect: HTMLSelectElement;
   driverFilter: HTMLSelectElement;
   searchFilter: HTMLInputElement;
@@ -39,6 +42,9 @@ export function createAppRefs(): AppRefs {
     sqliteInput: queryRequired<HTMLInputElement>('#sqlite-input'),
     exportJson: queryRequired<HTMLButtonElement>('#export-json'),
     exportSqlite: queryRequired<HTMLButtonElement>('#export-sqlite'),
+    syncControls: queryRequired<HTMLElement>('#sync-controls'),
+    syncStatus: queryRequired<HTMLElement>('#sync-status'),
+    syncConnect: queryRequired<HTMLButtonElement>('#sync-connect'),
     raceSelect: queryRequired<HTMLSelectElement>('#race-select'),
     driverFilter: queryRequired<HTMLSelectElement>('#driver-filter'),
     searchFilter: queryRequired<HTMLInputElement>('#search-filter'),

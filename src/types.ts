@@ -115,13 +115,26 @@ export interface LoadedCsvFile {
   contentHash: string;
 }
 
-export interface RaceRecord extends DbRow {
+export interface RaceRecord extends DbRow, SyncMetadata {
   id: string;
+  race_key: string;
   name: string;
+  source_file_name: string;
+  content_hash: string;
   race_start_time: string | null;
   row_count?: number;
   imported_at?: string;
   updated_at?: string;
+  artifact_sha256?: string | null;
+  artifact_size_bytes?: number | null;
+}
+
+export interface SyncMetadata {
+  created_by?: string | null;
+  updated_by?: string | null;
+  sync_workspace_id?: string | null;
+  sync_server_sequence?: number | null;
+  sync_origin_client_id?: string | null;
 }
 
 export interface LapRow extends DbRow {
@@ -181,7 +194,7 @@ export type PanelAnnotationKind =
   | 'rangeEvent'
   | 'driverStint';
 
-export interface LapNote extends DbRow {
+export interface LapNote extends DbRow, SyncMetadata {
   id: string;
   race_id: string;
   lap_number: number;
@@ -192,7 +205,7 @@ export interface LapNote extends DbRow {
   updated_at: string;
 }
 
-export interface TaggedIncident extends DbRow {
+export interface TaggedIncident extends DbRow, SyncMetadata {
   id: string;
   race_id: string;
   lap_number: number;
@@ -204,7 +217,7 @@ export interface TaggedIncident extends DbRow {
   updated_at: string;
 }
 
-export interface RangeEvent extends DbRow {
+export interface RangeEvent extends DbRow, SyncMetadata {
   id: string;
   race_id: string;
   start_lap: number;
@@ -217,7 +230,7 @@ export interface RangeEvent extends DbRow {
   updated_at: string;
 }
 
-export interface DriverStint extends DbRow {
+export interface DriverStint extends DbRow, SyncMetadata {
   id: string;
   race_id: string;
   driver_name: string;
@@ -229,7 +242,7 @@ export interface DriverStint extends DbRow {
   updated_at: string;
 }
 
-export interface JournalEntry extends DbRow {
+export interface JournalEntry extends DbRow, SyncMetadata {
   id: string;
   race_id: string;
   lap_number: number | null;
@@ -248,6 +261,90 @@ export interface RaceAnnotations {
   rangeEvents: RangeEvent[];
   driverStints: DriverStint[];
   journalEntries: JournalEntry[];
+}
+
+export type SyncMode = 'standalone' | 'cloud-connected' | 'read-only';
+
+export type SyncConnectionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'syncing'
+  | 'reconnect-required'
+  | 'error';
+
+export interface SyncSession {
+  subject: string;
+  workspaceId: string;
+  scopes: string[];
+  raceScopes: string[];
+  expiresAt: string;
+  currentSequence: number;
+}
+
+export interface SyncConfig extends DbRow {
+  id: number;
+  workspace_id: string;
+  api_base: string;
+  client_id: string;
+  connected_subject: string;
+  status: 'connected' | 'reconnect_required';
+  last_global_sequence_seen: number;
+  connected_at: string;
+  updated_at: string;
+}
+
+export interface SyncRaceCursor extends DbRow {
+  workspace_id: string;
+  race_key: string;
+  last_server_sequence: number;
+  updated_at: string;
+}
+
+export interface SyncOutboxRow extends DbRow {
+  id: string;
+  workspace_id: string;
+  client_id: string;
+  client_request_id: string;
+  race_key: string;
+  kind: AnnotationKind;
+  action: 'upsert' | 'delete';
+  annotation_id: string;
+  payload_json: string;
+  created_at: string;
+  status: 'pending' | 'accepted' | 'failed';
+  attempts: number;
+  last_error: string | null;
+  accepted_server_sequence: number | null;
+}
+
+export interface SyncRaceOutboxRow extends DbRow {
+  id: string;
+  workspace_id: string;
+  client_id: string;
+  client_request_id: string;
+  race_key: string;
+  action: 'upsert';
+  created_at: string;
+  status: 'pending' | 'accepted' | 'failed';
+  attempts: number;
+  last_error: string | null;
+  accepted_server_sequence: number | null;
+}
+
+export interface CloudRaceMetadata {
+  workspaceId?: string;
+  raceKey: string;
+  name: string;
+  sourceFileName: string;
+  contentHash: string;
+  raceStartTime: string | null;
+  rowCount: number;
+  artifactSha256: string;
+  artifactSizeBytes: number;
+  serverSequence: number;
+  updatedAt: string;
+  createdBy?: string | null;
+  updatedBy?: string | null;
 }
 
 export interface CandidateLap extends LapRow {

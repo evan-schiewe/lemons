@@ -92,7 +92,19 @@ h1 {
   justify-content: flex-end;
 }
 
+.sync-controls {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
 .data-tab-panel .hero-actions {
+  justify-content: flex-start;
+}
+
+.data-tab-panel .sync-controls {
   justify-content: flex-start;
 }
 
@@ -113,6 +125,12 @@ h1 {
 
 .button:hover {
   transform: translateY(-1px);
+}
+
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  transform: none;
 }
 
 .button.primary {

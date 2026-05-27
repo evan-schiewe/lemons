@@ -143,3 +143,14 @@ vite.config.ts.timestamp-*
 .vite/
 
 .bundle-analysis.html
+
+.terraform
+*.tfstate
+*.tfstate.backup
+*.tfvars
+
+mise.local.toml
+mise.*.local.toml
+mise.local.lock
+mise.*.local.lock
+!mise.local.toml.example

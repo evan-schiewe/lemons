@@ -1,7 +1,13 @@
 import initSqlJs from 'sql.js';
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { normalizeRaceData } from '../model/normalizeRaceData';
-import type { DbRow, ParsedRaceRow, SqlParams } from '../types';
+import type {
+  CloudRaceMetadata,
+  DbRow,
+  ParsedRaceRow,
+  SqlParams,
+  SqlValue,
+} from '../types';
 import schemaSql from './schema.sql?raw';
 
 const DATABASE_FILE_NAME = 'lemons-race-viewer.sqlite';
@@ -10,6 +16,82 @@ const STORAGE_SOURCE_KEY = 'lemons-race-viewer-db-source';
 const STORAGE_BUNDLE_VERSION_KEY = 'lemons-race-viewer-bundle-version';
 const STORAGE_SOURCE_BUNDLE = 'bundle';
 const STORAGE_SOURCE_CUSTOM = 'custom';
+
+const RACE_ARTIFACT_RACE_COLUMNS = [
+  'id',
+  'race_key',
+  'name',
+  'source_file_name',
+  'content_hash',
+  'race_start_time',
+  'row_count',
+  'imported_at',
+  'updated_at',
+];
+
+const RACE_LOCAL_SYNC_COLUMNS = [
+  'created_by',
+  'updated_by',
+  'sync_workspace_id',
+  'sync_server_sequence',
+  'sync_origin_client_id',
+  'artifact_sha256',
+  'artifact_size_bytes',
+];
+
+const RACE_IMPORT_COLUMNS = [
+  ...RACE_ARTIFACT_RACE_COLUMNS,
+  ...RACE_LOCAL_SYNC_COLUMNS,
+];
+
+const RACE_ARTIFACT_RAW_ROW_COLUMNS = [
+  'id',
+  'race_id',
+  'row_index',
+  'csv_row_number',
+  'raw_line',
+  'raw_lap',
+  'raw_entry',
+  'raw_driver',
+  'raw_lap_time',
+  'raw_position',
+  'raw_speed',
+  'raw_gap_ahead',
+  'raw_gap_leader',
+];
+
+const RACE_ARTIFACT_SCHEMA_SQL = `
+PRAGMA foreign_keys = ON;
+
+CREATE TABLE races (
+  id TEXT PRIMARY KEY,
+  race_key TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  source_file_name TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  race_start_time TEXT,
+  row_count INTEGER NOT NULL DEFAULT 0,
+  imported_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE raw_lap_rows (
+  id TEXT PRIMARY KEY,
+  race_id TEXT NOT NULL REFERENCES races(id) ON DELETE CASCADE,
+  row_index INTEGER NOT NULL,
+  csv_row_number INTEGER NOT NULL,
+  raw_line TEXT NOT NULL,
+  raw_lap TEXT,
+  raw_entry TEXT,
+  raw_driver TEXT,
+  raw_lap_time TEXT,
+  raw_position TEXT,
+  raw_speed TEXT,
+  raw_gap_ahead TEXT,
+  raw_gap_leader TEXT,
+  UNIQUE (race_id, row_index)
+);
+`;
 
 type SqlJsStatic = Awaited<ReturnType<typeof initSqlJs>>;
 type SqlJsDatabase = InstanceType<SqlJsStatic['Database']>;
@@ -57,6 +139,18 @@ export class SQLiteClient {
       database.run('ALTER TABLE races ADD COLUMN race_start_time TEXT');
     }
 
+    [
+      'created_by TEXT',
+      'updated_by TEXT',
+      'sync_workspace_id TEXT',
+      'sync_server_sequence INTEGER',
+      'sync_origin_client_id TEXT',
+      'artifact_sha256 TEXT',
+      'artifact_size_bytes INTEGER',
+    ].forEach((columnDefinition) => {
+      this.ensureColumn(database, 'races', columnDefinition);
+    });
+
     const hasJournalEntriesTable = this.tableExists(
       database,
       'journal_entries',
@@ -83,6 +177,20 @@ export class SQLiteClient {
         'CREATE INDEX IF NOT EXISTS idx_journal_entries_race_time ON journal_entries (race_id, event_time_iso)',
       );
     }
+
+    [
+      'lap_notes',
+      'tagged_incidents',
+      'range_events',
+      'driver_stints',
+      'journal_entries',
+    ].forEach((tableName) => {
+      this.ensureColumn(database, tableName, 'created_by TEXT');
+      this.ensureColumn(database, tableName, 'updated_by TEXT');
+      this.ensureColumn(database, tableName, 'sync_workspace_id TEXT');
+      this.ensureColumn(database, tableName, 'sync_server_sequence INTEGER');
+      this.ensureColumn(database, tableName, 'sync_origin_client_id TEXT');
+    });
   }
 
   queryDatabase<T extends DbRow = DbRow>(
@@ -123,6 +231,23 @@ export class SQLiteClient {
         [tableName],
       ).length > 0
     );
+  }
+
+  ensureColumn(
+    database: SqlJsDatabase,
+    tableName: string,
+    columnDefinition: string,
+  ): void {
+    const columnName = columnDefinition.split(/\s+/)[0];
+    const columns = this.queryDatabase<{ name: string }>(
+      database,
+      `PRAGMA table_info(${tableName})`,
+    );
+    if (columns.some((column) => column.name === columnName)) {
+      return;
+    }
+
+    database.run(`ALTER TABLE ${tableName} ADD COLUMN ${columnDefinition}`);
   }
 
   countRows(database: SqlJsDatabase, tableName: string): number {
@@ -299,6 +424,205 @@ export class SQLiteClient {
     return this.requireDb().export();
   }
 
+  exportRaceArtifact(raceId: string): Uint8Array {
+    const SQL = this.requireSql();
+    const artifactDatabase = new SQL.Database();
+
+    try {
+      artifactDatabase.run(RACE_ARTIFACT_SCHEMA_SQL);
+
+      const race = this.queryOne(
+        `SELECT ${RACE_ARTIFACT_RACE_COLUMNS.join(', ')} FROM races WHERE id = ?`,
+        [raceId],
+      );
+      if (!race) {
+        throw new Error('Race not found for cloud artifact export.');
+      }
+
+      artifactDatabase.run(
+        `
+          INSERT INTO races (${RACE_ARTIFACT_RACE_COLUMNS.join(', ')})
+          VALUES (${RACE_ARTIFACT_RACE_COLUMNS.map(() => '?').join(', ')})
+        `,
+        RACE_ARTIFACT_RACE_COLUMNS.map((column) => toSqlValue(race[column])),
+      );
+
+      const rawRows = this.query(
+        `
+          SELECT ${RACE_ARTIFACT_RAW_ROW_COLUMNS.join(', ')}
+          FROM raw_lap_rows
+          WHERE race_id = ?
+          ORDER BY row_index ASC
+        `,
+        [raceId],
+      );
+      this.executeManyOnDatabase(
+        artifactDatabase,
+        `
+          INSERT INTO raw_lap_rows (${RACE_ARTIFACT_RAW_ROW_COLUMNS.join(', ')})
+          VALUES (${RACE_ARTIFACT_RAW_ROW_COLUMNS.map(() => '?').join(', ')})
+        `,
+        rawRows.map((row) =>
+          RACE_ARTIFACT_RAW_ROW_COLUMNS.map((column) =>
+            toSqlValue(row[column]),
+          ),
+        ),
+      );
+
+      return artifactDatabase.export();
+    } finally {
+      artifactDatabase.close();
+    }
+  }
+
+  async importRaceArtifact(
+    bytes: ArrayLike<number>,
+    metadata: CloudRaceMetadata,
+  ): Promise<string> {
+    const incoming = new Uint8Array(bytes);
+    const SQL = this.requireSql();
+    let artifactDatabase: SqlJsDatabase | null = null;
+
+    try {
+      artifactDatabase = new SQL.Database(incoming);
+      if (metadata.artifactSha256) {
+        const actualSha256 = await sha256Hex(incoming);
+        if (actualSha256 !== metadata.artifactSha256) {
+          throw new Error('Cloud race artifact checksum does not match.');
+        }
+      }
+
+      if (
+        !this.tableExists(artifactDatabase, 'races') ||
+        !this.tableExists(artifactDatabase, 'raw_lap_rows')
+      ) {
+        throw new Error('Cloud race artifact is not a valid race SQLite file.');
+      }
+
+      artifactDatabase.run(schemaSql);
+      this.applyMigrations(artifactDatabase);
+
+      const races = this.queryDatabase<DbRow>(
+        artifactDatabase,
+        `SELECT ${RACE_ARTIFACT_RACE_COLUMNS.join(', ')} FROM races`,
+      );
+      if (races.length !== 1) {
+        throw new Error('Cloud race artifact must contain exactly one race.');
+      }
+
+      const artifactRace = races[0];
+      if (artifactRace.race_key !== metadata.raceKey) {
+        throw new Error(
+          'Cloud race artifact metadata does not match race_key.',
+        );
+      }
+
+      const rawRows = this.queryDatabase<DbRow>(
+        artifactDatabase,
+        `
+          SELECT ${RACE_ARTIFACT_RAW_ROW_COLUMNS.join(', ')}
+          FROM raw_lap_rows
+          WHERE race_id = ?
+          ORDER BY row_index ASC
+        `,
+        [`${artifactRace.id ?? ''}`],
+      );
+      if (!rawRows.length) {
+        throw new Error('Cloud race artifact does not contain raw lap rows.');
+      }
+
+      const existingRace = this.queryOne<{ id: string }>(
+        'SELECT id FROM races WHERE race_key = ?',
+        [metadata.raceKey],
+      );
+      const localRaceId = existingRace?.id ?? crypto.randomUUID();
+      const now = new Date().toISOString();
+      const raceRecord: DbRow = {
+        ...artifactRace,
+        id: localRaceId,
+        race_key: metadata.raceKey,
+        name: metadata.name,
+        source_file_name: metadata.sourceFileName,
+        content_hash: metadata.contentHash,
+        race_start_time: metadata.raceStartTime,
+        row_count: metadata.rowCount,
+        imported_at: artifactRace.imported_at || now,
+        updated_at: metadata.updatedAt,
+        created_by: artifactRace.created_by || metadata.createdBy || null,
+        updated_by: metadata.updatedBy || null,
+        sync_workspace_id: metadata.workspaceId || null,
+        sync_server_sequence: metadata.serverSequence,
+        sync_origin_client_id: null,
+        artifact_sha256: metadata.artifactSha256,
+        artifact_size_bytes: metadata.artifactSizeBytes,
+      };
+
+      this.transaction(() => {
+        if (existingRace) {
+          this.execute(
+            `
+              UPDATE races
+              SET ${RACE_IMPORT_COLUMNS.filter(
+                (column) => column !== 'id' && column !== 'race_key',
+              )
+                .map((column) => `${column} = ?`)
+                .join(', ')}
+              WHERE id = ?
+            `,
+            [
+              ...RACE_IMPORT_COLUMNS.filter(
+                (column) => column !== 'id' && column !== 'race_key',
+              ).map((column) => toSqlValue(raceRecord[column])),
+              localRaceId,
+            ],
+          );
+          this.execute('DELETE FROM raw_lap_rows WHERE race_id = ?', [
+            localRaceId,
+          ]);
+          this.execute('DELETE FROM normalized_laps WHERE race_id = ?', [
+            localRaceId,
+          ]);
+        } else {
+          this.execute(
+            `
+              INSERT INTO races (${RACE_IMPORT_COLUMNS.join(', ')})
+              VALUES (${RACE_IMPORT_COLUMNS.map(() => '?').join(', ')})
+            `,
+            RACE_IMPORT_COLUMNS.map((column) => toSqlValue(raceRecord[column])),
+          );
+        }
+
+        const localRawRows = rawRows.map((row, index) =>
+          RACE_ARTIFACT_RAW_ROW_COLUMNS.map((column) => {
+            if (column === 'id') {
+              return crypto.randomUUID();
+            }
+            if (column === 'race_id') {
+              return localRaceId;
+            }
+            if (column === 'row_index') {
+              return Number(row.row_index ?? index);
+            }
+            return toSqlValue(row[column]);
+          }),
+        );
+        this.executeMany(
+          `
+            INSERT INTO raw_lap_rows (${RACE_ARTIFACT_RAW_ROW_COLUMNS.join(', ')})
+            VALUES (${RACE_ARTIFACT_RAW_ROW_COLUMNS.map(() => '?').join(', ')})
+          `,
+          localRawRows,
+        );
+      });
+
+      this.rebuildNormalizedLaps(this.requireDb());
+      await this.persist();
+      return localRaceId;
+    } finally {
+      artifactDatabase?.close();
+    }
+  }
+
   async restoreDatabase(bytes: ArrayLike<number>): Promise<void> {
     const incoming = new Uint8Array(bytes);
     let restoredDatabase: SqlJsDatabase | null = null;
@@ -332,6 +656,8 @@ export class SQLiteClient {
       ) {
         this.rebuildNormalizedLaps(restoredDatabase);
       }
+
+      this.markRestoredSyncAsReconnectRequired(restoredDatabase);
 
       const previousDb = this.db;
       this.db = restoredDatabase;
@@ -422,6 +748,18 @@ export class SQLiteClient {
     this.db.run(schemaSql);
     this.applyMigrations(this.db);
     this.storageMode = 'memory';
+  }
+
+  markRestoredSyncAsReconnectRequired(database: SqlJsDatabase): void {
+    if (!this.tableExists(database, 'sync_config')) {
+      return;
+    }
+
+    database.run(`
+      UPDATE sync_config
+      SET status = 'reconnect_required', updated_at = datetime('now')
+      WHERE id = 1
+    `);
   }
 
   async readFromOpfs(): Promise<Uint8Array | null> {
@@ -568,4 +906,26 @@ export class SQLiteClient {
 
     return this.SQL;
   }
+}
+
+function toSqlValue(value: unknown): SqlValue {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'number' ||
+    value instanceof Uint8Array
+  ) {
+    return value;
+  }
+
+  return value == null ? null : `${value}`;
+}
+
+async function sha256Hex(bytes: Uint8Array): Promise<string> {
+  const body = new Uint8Array(bytes.byteLength);
+  body.set(bytes);
+  const digest = await crypto.subtle.digest('SHA-256', body.buffer);
+  return Array.from(new Uint8Array(digest))
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
 }

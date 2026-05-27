@@ -78,6 +78,9 @@ export function syncDataTabAndActions(refs: AppRefs, hasData: boolean): void {
   if (refs.dataActions.parentElement !== targetHost) {
     targetHost.append(refs.dataActions);
   }
+  if (refs.syncControls.parentElement !== targetHost) {
+    targetHost.append(refs.syncControls);
+  }
 
   refs.heroActionsHost.hidden = hasData;
 }

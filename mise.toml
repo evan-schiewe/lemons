@@ -1,0 +1,99 @@
+redactions = [
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "CLOUDFLARE_API_TOKEN",
+  "TOKEN_SIGNING_SECRET",
+]
+
+[tools]
+node = "26"
+pnpm = { version = "11.3.0", depends = ["node"] }
+prek = "0.4.3"
+opentofu = "1.12.0"
+wrangler = { version = "4.95.0", depends = ["node", "pnpm"] }
+gh = "2.92.0"
+
+[env]
+APP_URL = "https://evan-schiewe.github.io/lemons/"
+
+# OpenTofu R2 backend credentials are supplied locally.
+AWS_REGION = "us-east-1"
+AWS_DEFAULT_REGION = "us-east-1"
+AWS_EC2_METADATA_DISABLED = "true"
+
+[tasks.install]
+description = "Install project dependencies"
+run = "pnpm install"
+
+[tasks.dev]
+description = "Run the Vite dev server"
+run = "pnpm dev"
+
+[tasks.check]
+description = "Run Biome and TypeScript checks"
+run = "pnpm check"
+
+[tasks.build]
+description = "Build the static app"
+run = "pnpm build"
+
+[tasks.ci]
+description = "Run the local pre-ship checks"
+depends = ["check", "build", "infra-fmt-check"]
+
+[tasks.hooks-install]
+description = "Install prek Git hooks"
+run = "prek install"
+
+[tasks.hooks-run]
+description = "Run prek hooks against all files"
+run = "prek run --all-files"
+
+[tasks.infra-init]
+description = "Initialize Cloudflare OpenTofu providers"
+dir = "infra/cloudflare"
+run = "tofu init"
+
+[tasks.infra-plan]
+description = "Plan Cloudflare infrastructure changes"
+dir = "infra/cloudflare"
+run = "tofu plan"
+
+[tasks.infra-apply]
+description = "Apply Cloudflare infrastructure changes"
+dir = "infra/cloudflare"
+run = "tofu apply"
+
+[tasks.infra-fmt]
+description = "Format OpenTofu files"
+run = "tofu fmt -recursive infra"
+
+[tasks.infra-fmt-check]
+description = "Check OpenTofu formatting"
+run = "tofu fmt -check -recursive infra"
+
+[tasks.infra-validate]
+description = "Validate Cloudflare OpenTofu configuration"
+dir = "infra/cloudflare"
+run = "tofu validate"
+
+[tasks.worker-dev]
+description = "Run the Cloudflare Worker locally"
+dir = "cloudflare/worker"
+run = "wrangler dev"
+
+[tasks.worker-migrate-local]
+description = "Apply local D1 migrations for the Worker"
+dir = "cloudflare/worker"
+run = [
+  "wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0001_sync_schema.sql",
+  "wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0002_race_artifacts.sql",
+  "wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0003_race_upload_limits.sql",
+]
+
+[tasks.sync-edit-link]
+description = "Create a collaborative edit link"
+run = '''
+TOKEN_SIGNING_SECRET="${TOKEN_SIGNING_SECRET:-$(printf "%s\n" "nonsensitive(var.token_signing_secret)" | tofu -chdir=infra/cloudflare console | sed "s/^\"//; s/\"$//")}" \
+  node cloudflare/worker/create-token.mjs --sub alice@example.com --app-url $APP_URL
+'''

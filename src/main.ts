@@ -31,6 +31,8 @@ import {
   getRaceTimelineEvents,
   getSummary,
 } from './features/query/raceQueries';
+import { SyncController } from './features/sync/syncController';
+import { createSyncAnnotationStore } from './features/sync/syncLocalStore';
 import {
   renderLapTable,
   scrollToLap,
@@ -48,10 +50,9 @@ import type {
   RaceAnnotations,
   SortColumn,
   SummaryRow,
+  SyncMode,
 } from './types';
 import { closestElement, errorMessage, queryRequired } from './utils/dom';
-
-const isLocalEditingEnabled = import.meta.env.DEV;
 
 const refs = createAppRefs();
 const state = createInitialAppState();
@@ -72,6 +73,7 @@ let renderSummaryCards:
 let annotationHelper: ReturnType<typeof mountAnnotationHelper> | null = null;
 let annotationPanel: ReturnType<typeof mountAnnotationPanel> | null = null;
 let timelineView: ReturnType<typeof mountTimelineView> | null = null;
+let syncController: SyncController | null = null;
 
 function getDb(): SQLiteClient {
   if (!state.db) {
@@ -87,6 +89,14 @@ function getAnnotationStore(): AnnotationStore {
   }
 
   return state.annotationStore;
+}
+
+function getSyncMode(): SyncMode {
+  return syncController?.getSnapshot().mode ?? 'standalone';
+}
+
+function isEditingEnabled(): boolean {
+  return getSyncMode() !== 'read-only';
 }
 
 async function ensureChartModules(): Promise<void> {
@@ -178,6 +188,7 @@ function createAnnotationHandlers({
         }
 
         await refreshView();
+        void syncController?.syncNow();
         return true;
       } catch (error) {
         console.error(error);
@@ -190,6 +201,7 @@ function createAnnotationHandlers({
         await getAnnotationStore().remove(kind, id);
         setStatus('Annotation removed.');
         await refreshView();
+        void syncController?.syncNow();
       } catch (error) {
         console.error(error);
         setStatus(`Unable to remove annotation: ${errorMessage(error)}`);
@@ -208,7 +220,16 @@ async function initialize(): Promise<void> {
   setAppLoadingState(true);
   setStatus('Initializing browser SQLite cache...');
   state.db = await new SQLiteClient().init();
-  state.annotationStore = createAnnotationStore(state.db);
+  syncController = new SyncController(state.db, {
+    onChange: renderSyncControls,
+    onStatus: setStatus,
+  });
+  await syncController.initFromLocation();
+  state.annotationStore = createSyncAnnotationStore(
+    state.db,
+    createAnnotationStore(state.db),
+    () => syncController?.getActiveConfig() ?? null,
+  );
 
   // Restore helper state from localStorage
   state.helperAutoAdvance = localStorage.getItem('helperAutoAdvance') === '1';
@@ -290,7 +311,7 @@ async function initialize(): Promise<void> {
   timelineView = mountTimelineView(refs.timelineContainer, {
     ...createAnnotationHandlers(),
     onSelectLap: handleLapSelectionByNumber,
-    isLocalEditingEnabled,
+    isLocalEditingEnabled: isEditingEnabled(),
   });
 
   wireEvents();
@@ -333,17 +354,20 @@ function wireEvents(): void {
     );
     await refreshView();
   });
-  refs.exportJson.addEventListener('click', () => {
+  refs.exportJson.addEventListener('click', async () => {
+    await syncController?.syncNow();
     if (state.activeRaceId) {
       exportAnnotationsFile(getDb(), state.activeRaceId);
     }
   });
-  refs.exportSqlite.addEventListener('click', () => {
+  refs.exportSqlite.addEventListener('click', async () => {
+    await syncController?.syncNow();
     const activeRace = state.races.find(
       (race) => race.id === state.activeRaceId,
     );
     exportDatabaseFile(getDb(), activeRace?.name || 'lemons-race-viewer');
   });
+  refs.syncConnect.addEventListener('click', handleSyncConnect);
   queryRequired<HTMLTableSectionElement>('thead', refs.table).addEventListener(
     'click',
     async (event) => {
@@ -391,10 +415,84 @@ function wireEvents(): void {
     charts.lapTime?.resize();
   });
   setupTabSwitching(refs, {
-    isLocalEditingEnabled,
+    isLocalEditingEnabled: isEditingEnabled(),
     onChartTabShown: () => charts.lapTime?.resize(),
   });
   setupAnnotationSubtabs(refs);
+}
+
+async function handleSyncConnect(): Promise<void> {
+  if (!syncController) {
+    return;
+  }
+
+  const snapshot = syncController.getSnapshot();
+  if (snapshot.mode === 'cloud-connected') {
+    await syncController.syncNow();
+    await refreshRaceOptions();
+    await refreshView();
+    return;
+  }
+
+  if (!syncController.canConnect()) {
+    setStatus(
+      'Open a valid collaborative edit link before connecting cloud sync.',
+    );
+    return;
+  }
+
+  const didConfirm = window.confirm(
+    'Connect this local SQLite database to the Cloudflare sync workspace? Existing local annotations will be queued for upload.',
+  );
+  if (!didConfirm) {
+    return;
+  }
+
+  try {
+    await syncController.connectCurrentDatabase();
+    await refreshRaceOptions();
+    await refreshView();
+  } catch (error) {
+    console.error(error);
+    setStatus(`Cloud sync failed: ${errorMessage(error)}`);
+  }
+}
+
+function renderSyncControls(): void {
+  const snapshot = syncController?.getSnapshot();
+  if (!snapshot?.apiBase) {
+    refs.syncControls.hidden = true;
+    return;
+  }
+
+  refs.syncControls.hidden = false;
+  refs.syncConnect.hidden = snapshot.mode === 'read-only';
+  refs.syncConnect.disabled =
+    snapshot.mode !== 'cloud-connected' && !snapshot.session;
+  refs.syncConnect.textContent =
+    snapshot.mode === 'cloud-connected' ? 'Sync Now' : 'Connect Cloud Sync';
+
+  const pendingSuffix = snapshot.pendingCount
+    ? `, ${snapshot.pendingCount} pending`
+    : '';
+  const failedSuffix = snapshot.failedCount
+    ? `, ${snapshot.failedCount} failed`
+    : '';
+
+  if (snapshot.mode === 'read-only') {
+    refs.syncStatus.textContent = 'Read-only';
+  } else if (snapshot.mode === 'cloud-connected') {
+    refs.syncStatus.textContent =
+      snapshot.status === 'syncing'
+        ? `Cloud syncing${pendingSuffix}`
+        : `Cloud connected${pendingSuffix}${failedSuffix}`;
+  } else if (snapshot.status === 'reconnect-required') {
+    refs.syncStatus.textContent = `Reconnect required${pendingSuffix}${failedSuffix}`;
+  } else if (snapshot.session) {
+    refs.syncStatus.textContent = 'Edit token ready';
+  } else {
+    refs.syncStatus.textContent = 'Open edit link to connect';
+  }
 }
 
 async function handleImport(event: Event): Promise<void> {
@@ -431,6 +529,7 @@ async function handleImport(event: Event): Promise<void> {
       const result = await importRace(db, file, {
         raceStartTime: importOptions.raceStartTime,
       });
+      await syncController?.queueRaceForSync(result.raceKey);
       messages.push(
         `${result.raceName}: ${result.rowCount} laps${result.warnings.length ? ` (${result.warnings.length} repairs/warnings)` : ''}`,
       );
@@ -440,6 +539,7 @@ async function handleImport(event: Event): Promise<void> {
     input.value = '';
     await refreshRaceOptions();
     await refreshView();
+    void syncController?.syncNow();
     setStatus(`Import complete. ${messages.join(' | ')}`);
   } catch (error) {
     console.error(error);
@@ -467,6 +567,7 @@ async function handleRestoreSqlite(event: Event): Promise<void> {
     state.activeRaceId = '';
     state.selectedLapId = '';
     state.helperCurrentIndex = 0;
+    syncController?.reloadFromDatabase();
 
     refs.sqliteInput.value = '';
     await refreshRaceOptions();

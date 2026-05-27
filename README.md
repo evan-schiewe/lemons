@@ -54,6 +54,10 @@ pnpm preview
 
 This project is static-host friendly. CI installs with the committed lockfile, runs `pnpm check`, builds, and publishes `dist` to GitHub Pages.
 
+In repository Settings -> Pages, set **Build and deployment -> Source** to **GitHub Actions**. If Source is left in legacy branch mode (`main` + `/`), GitHub Pages serves repository source files instead of the built `dist` artifact and can fail with module MIME errors.
+
+Optional collaborative sync deployment and usage instructions are in [docs/cloudflare-sync-deployment.md](docs/cloudflare-sync-deployment.md).
+
 If you later move from the current exported-file OPFS persistence approach to a stricter SQLite OPFS VFS path, add a lightweight service worker such as `coi-serviceworker` so GitHub Pages can emulate the cross-origin isolation headers required by that setup.
 
 The current implementation already exports durable `.json` and `.sqlite` backups, so OPFS should be treated as a local cache rather than the only permanent store.
@@ -65,7 +69,7 @@ The current implementation already exports durable `.json` and `.sqlite` backups
 - Restore workflow: use **Restore SQLite** to import a previously exported `.sqlite` backup and repopulate all races and annotations.
 - Re-import behavior: importing the same CSV content updates the same race record instead of duplicating it.
 - Annotation behavior: re-import refreshes raw and normalized laps while keeping the race identity stable, so stored annotations remain attached to the same race.
-- Authoring behavior: annotation authoring is intentionally enabled in local development builds for now; production builds are read-only for annotation editing.
+- Authoring behavior: annotation authoring is local-first. Production builds are standalone by default unless explicitly configured with Cloudflare sync or read-only mode.
 
 ## Supported CSV Shape
 

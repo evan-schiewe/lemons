@@ -33,7 +33,7 @@ const SORTABLE_COLUMNS: Partial<Record<SortColumn, string>> = {
 export function getRaceList(db: SQLiteClient): RaceRecord[] {
   return db.query<RaceRecord>(
     `
-      SELECT id, name, source_file_name, race_start_time, row_count, imported_at, updated_at
+      SELECT id, race_key, name, source_file_name, race_start_time, row_count, imported_at, updated_at
       FROM races
       ORDER BY updated_at DESC
     `,

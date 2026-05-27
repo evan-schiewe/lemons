@@ -6,12 +6,12 @@ import type {
   SqlValue,
 } from '../../types';
 
-interface AnnotationTableConfig {
+export interface AnnotationTableConfig {
   table: string;
   fields: string[];
 }
 
-const TABLE_CONFIG = {
+export const ANNOTATION_TABLE_CONFIG = {
   lapNote: {
     table: 'lap_notes',
     fields: [
@@ -153,7 +153,7 @@ function toSqlValue(value: unknown): SqlValue {
 export function createAnnotationStore(db: SQLiteClient): AnnotationStore {
   return {
     async save(kind: AnnotationKind, payload: AnnotationPayload) {
-      const config = TABLE_CONFIG[kind];
+      const config = ANNOTATION_TABLE_CONFIG[kind];
 
       validateAnnotationPayload(kind, payload);
 
@@ -205,7 +205,7 @@ export function createAnnotationStore(db: SQLiteClient): AnnotationStore {
       return id;
     },
     async remove(kind: AnnotationKind, id: string) {
-      const config = TABLE_CONFIG[kind];
+      const config = ANNOTATION_TABLE_CONFIG[kind];
 
       db.execute(`DELETE FROM ${config.table} WHERE id = ?`, [id]);
       await db.persist();

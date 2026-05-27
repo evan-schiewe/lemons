@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "lemons-sync-api",
+  "main": "./src/index.mjs",
+  "compatibility_date": "2026-05-27",
+  "vars": {
+    "AUTO_DOWNLOAD_MAX_BYTES": "104857600",
+    "RACE_ARTIFACT_MAX_BYTES": "26214400",
+    "RACE_WORKSPACE_STORAGE_QUOTA_BYTES": "1073741824",
+    "RACE_UPLOADS_PER_TOKEN_PER_DAY": "20",
+    "RACE_UPLOADS_PER_WORKSPACE_PER_DAY": "100",
+    "RACE_ARTIFACT_RETAINED_VERSIONS": "2",
+    "RACE_VERSION_LIFECYCLE_MAX_AGE_SECONDS": "2592000",
+    "ALLOWED_ORIGINS": "http://localhost:5173",
+    "ENVIRONMENT": "development"
+  },
+  "r2_buckets": [
+    {
+      "binding": "RACE_ARTIFACTS",
+      "bucket_name": "lemons-race-artifacts"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "lemons_annotations",
+      "database_id": "replace-with-d1-database-id",
+      "migrations_dir": "../../infra/cloudflare/d1/migrations"
+    }
+  ]
+}

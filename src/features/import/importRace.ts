@@ -10,6 +10,7 @@ interface ImportRaceOptions {
 
 export interface ImportRaceResult {
   raceId: string;
+  raceKey: string;
   raceName: string;
   rowCount: number;
   warnings: string[];
@@ -155,6 +156,7 @@ export async function importRace(
 
   return {
     raceId,
+    raceKey,
     raceName: loadedFile.raceName,
     rowCount: normalized.laps.length,
     warnings: parsedCsv.warnings,

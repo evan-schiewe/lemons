@@ -9,7 +9,14 @@ CREATE TABLE IF NOT EXISTS races (
   race_start_time TEXT,
   row_count INTEGER NOT NULL DEFAULT 0,
   imported_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  created_by TEXT,
+  updated_by TEXT,
+  sync_workspace_id TEXT,
+  sync_server_sequence INTEGER,
+  sync_origin_client_id TEXT,
+  artifact_sha256 TEXT,
+  artifact_size_bytes INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS raw_lap_rows (
@@ -78,7 +85,12 @@ CREATE TABLE IF NOT EXISTS lap_notes (
   note_text TEXT NOT NULL,
   color TEXT NOT NULL DEFAULT '#f59e0b',
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  created_by TEXT,
+  updated_by TEXT,
+  sync_workspace_id TEXT,
+  sync_server_sequence INTEGER,
+  sync_origin_client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS tagged_incidents (
@@ -90,7 +102,12 @@ CREATE TABLE IF NOT EXISTS tagged_incidents (
   color TEXT NOT NULL DEFAULT '#d94f2b',
   details TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  created_by TEXT,
+  updated_by TEXT,
+  sync_workspace_id TEXT,
+  sync_server_sequence INTEGER,
+  sync_origin_client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS range_events (
@@ -103,7 +120,12 @@ CREATE TABLE IF NOT EXISTS range_events (
   color TEXT NOT NULL DEFAULT '#2563eb',
   details TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  created_by TEXT,
+  updated_by TEXT,
+  sync_workspace_id TEXT,
+  sync_server_sequence INTEGER,
+  sync_origin_client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS driver_stints (
@@ -115,7 +137,12 @@ CREATE TABLE IF NOT EXISTS driver_stints (
   color TEXT NOT NULL DEFAULT '#059669',
   notes TEXT,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  created_by TEXT,
+  updated_by TEXT,
+  sync_workspace_id TEXT,
+  sync_server_sequence INTEGER,
+  sync_origin_client_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS journal_entries (
@@ -128,7 +155,76 @@ CREATE TABLE IF NOT EXISTS journal_entries (
   entry_text TEXT NOT NULL,
   color TEXT NOT NULL DEFAULT '#7c3aed',
   created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  created_by TEXT,
+  updated_by TEXT,
+  sync_workspace_id TEXT,
+  sync_server_sequence INTEGER,
+  sync_origin_client_id TEXT
+);
+
+CREATE TABLE IF NOT EXISTS sync_config (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  workspace_id TEXT NOT NULL,
+  api_base TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  connected_subject TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('connected', 'reconnect_required')),
+  last_global_sequence_seen INTEGER NOT NULL DEFAULT 0,
+  connected_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sync_race_cursors (
+  workspace_id TEXT NOT NULL,
+  race_key TEXT NOT NULL,
+  last_server_sequence INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY (workspace_id, race_key)
+);
+
+CREATE TABLE IF NOT EXISTS sync_outbox (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  client_request_id TEXT NOT NULL,
+  race_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('upsert', 'delete')),
+  annotation_id TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  accepted_server_sequence INTEGER,
+  UNIQUE (workspace_id, client_request_id)
+);
+
+CREATE TABLE IF NOT EXISTS sync_race_outbox (
+  id TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  client_id TEXT NOT NULL,
+  client_request_id TEXT NOT NULL,
+  race_key TEXT NOT NULL,
+  action TEXT NOT NULL CHECK (action IN ('upsert')),
+  created_at TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending',
+  attempts INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  accepted_server_sequence INTEGER,
+  UNIQUE (workspace_id, client_request_id)
+);
+
+CREATE TABLE IF NOT EXISTS annotation_tombstones (
+  workspace_id TEXT NOT NULL,
+  race_key TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  annotation_id TEXT NOT NULL,
+  deleted_at TEXT NOT NULL,
+  deleted_by TEXT,
+  sync_server_sequence INTEGER,
+  PRIMARY KEY (workspace_id, race_key, kind, annotation_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_lap_notes_race_lap ON lap_notes (race_id, lap_number);
@@ -137,3 +233,5 @@ CREATE INDEX IF NOT EXISTS idx_range_events_race_lap ON range_events (race_id, s
 CREATE INDEX IF NOT EXISTS idx_driver_stints_race_lap ON driver_stints (race_id, start_lap, end_lap);
 CREATE INDEX IF NOT EXISTS idx_journal_entries_race_lap ON journal_entries (race_id, lap_number);
 CREATE INDEX IF NOT EXISTS idx_journal_entries_race_time ON journal_entries (race_id, event_time_iso);
+CREATE INDEX IF NOT EXISTS idx_sync_outbox_pending ON sync_outbox (workspace_id, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_sync_race_outbox_pending ON sync_race_outbox (workspace_id, status, created_at);
