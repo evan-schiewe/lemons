@@ -1,6 +1,6 @@
 # Lemons Race Viewer
 
-Static browser app for importing Lemons lap CSVs, repairing malformed gap fields, normalizing laps into an in-browser SQLite database, and reviewing pace, position, gap, and annotation views.
+Static browser app for importing Lemons lap CSVs, repairing malformed gap fields, normalizing laps into an in-browser SQLite database, and reviewing pace, position, gap, timeline, and annotation data.
 
 ## Stack
 
@@ -22,11 +22,18 @@ If OPFS is unavailable, the app keeps data only in memory for the current sessio
 
 ## Local Development
 
-Install and run with `pnpm`:
+Install and run with Node 22.13+ or Node 24 and pnpm 11.3:
 
 ```bash
 pnpm install
 pnpm dev
+```
+
+Use the same checks as CI before publishing:
+
+```bash
+pnpm check
+pnpm build
 ```
 
 The Vite dev server and preview server are configured with:
@@ -45,11 +52,9 @@ pnpm preview
 
 ## GitHub Pages Deployment
 
-This project is static-host friendly. The recommended deployment path is:
+This project is static-host friendly. CI installs with the committed lockfile, runs `pnpm check`, builds, and publishes `dist` to GitHub Pages.
 
-1. Build with `pnpm build`.
-2. Publish the `dist` directory to GitHub Pages.
-3. If you later move from the current exported-file OPFS persistence approach to a stricter SQLite OPFS VFS path, add a lightweight service worker such as `coi-serviceworker` so GitHub Pages can emulate the cross-origin isolation headers required by that setup.
+If you later move from the current exported-file OPFS persistence approach to a stricter SQLite OPFS VFS path, add a lightweight service worker such as `coi-serviceworker` so GitHub Pages can emulate the cross-origin isolation headers required by that setup.
 
 The current implementation already exports durable `.json` and `.sqlite` backups, so OPFS should be treated as a local cache rather than the only permanent store.
 
@@ -60,6 +65,7 @@ The current implementation already exports durable `.json` and `.sqlite` backups
 - Restore workflow: use **Restore SQLite** to import a previously exported `.sqlite` backup and repopulate all races and annotations.
 - Re-import behavior: importing the same CSV content updates the same race record instead of duplicating it.
 - Annotation behavior: re-import refreshes raw and normalized laps while keeping the race identity stable, so stored annotations remain attached to the same race.
+- Authoring behavior: annotation authoring is intentionally enabled in local development builds for now; production builds are read-only for annotation editing.
 
 ## Supported CSV Shape
 
@@ -89,16 +95,14 @@ Known malformed rows are repaired with domain-specific handling rather than gene
 - lap times and gap-like values are parsed into numeric millisecond fields where possible
 - gap phrases containing lap counts preserve lap semantics separately from pure time gaps
 - `is_outlier = true` when a lap exceeds 130% of the rolling median lap time
-- “Green Flag Pace” is computed from laps that are not outliers, pit candidates, or repair candidates
-- pit and repair candidates are derived from larger rolling-median deviations so long laps are easy to distinguish in summaries and charts
+- summary pace can be filtered to green-flag laps and trims the slowest 5% from the selected lap set
 
 ## Verification Checklist
 
 - Import one or more CSV files from the toolbar
 - Re-import the same CSV and confirm it updates the existing race
 - Refresh the page and confirm the active origin restores stored races
-- Use the Reset Storage button to delete all stored races, annotations, and cached SQLite data for the site
-- Add lap notes, incidents, range events, and driver stints
+- In local development, add lap notes, incidents, range events, driver stints, and journal entries
 - Export the annotated race as `.json` and the whole database as `.sqlite`
 - Restore the exported `.sqlite` and confirm races and annotations reload
 - Confirm the lap table, summary cards, and all chart views continue to populate from the persisted SQLite data

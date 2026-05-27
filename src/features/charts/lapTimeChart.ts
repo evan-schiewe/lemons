@@ -19,7 +19,7 @@ import type {
   RangeEvent,
   TaggedIncident,
 } from '../../types';
-import { formatNumber } from '../../utils/format';
+import { escapeHtml, formatNumber } from '../../utils/format';
 import { formatDurationMs, formatGapDisplay } from '../../utils/time';
 
 echarts.use([
@@ -263,7 +263,7 @@ export function createLapTimeChart(
         encode: { x: [0, 1], y: 2 },
         tooltip: {
           formatter: (params: ChartTooltipParam) =>
-            params.data?.label || 'Driver stint',
+            escapeHtml(params.data?.label || 'Driver stint'),
         },
         z: 3,
       };
@@ -383,19 +383,20 @@ export function createLapTimeChart(
             items
               .map((item) => {
                 const value = item.value?.[1];
+                const seriesName = escapeHtml(item.seriesName);
                 if (item.seriesName.startsWith('Lap Times')) {
-                  return `${item.seriesName}: ${formatDurationMs(typeof value === 'number' ? value * 1000 : null)}`;
+                  return `${seriesName}: ${escapeHtml(formatDurationMs(typeof value === 'number' ? value * 1000 : null))}`;
                 }
                 if (item.seriesName.startsWith('Position')) {
-                  return `${item.seriesName}: ${formatNumber(value)}`;
+                  return `${seriesName}: ${escapeHtml(formatNumber(value))}`;
                 }
                 if (item.seriesName.startsWith('Gap to Leader')) {
-                  return `${item.seriesName}: ${item.data?.gapDisplay ?? formatNumber(value)}`;
+                  return `${seriesName}: ${escapeHtml(item.data?.gapDisplay ?? formatNumber(value))}`;
                 }
                 if (item.seriesName.startsWith('Driver Stints')) {
-                  return `${item.seriesName}: ${item.data?.label ?? ''}`;
+                  return `${seriesName}: ${escapeHtml(item.data?.label ?? '')}`;
                 }
-                return `${item.seriesName}: ${item.data?.label ?? ''}`;
+                return `${seriesName}: ${escapeHtml(item.data?.label ?? '')}`;
               })
               .join('<br/>'),
         },

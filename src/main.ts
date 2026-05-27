@@ -1,4 +1,17 @@
 import './styles.css';
+import { promptForRaceImportOptions } from './app/importPrompt';
+import {
+  getLapBounds,
+  parseIntegerOrNull,
+  syncLapRangeInputs,
+} from './app/lapRange';
+import { createAppRefs } from './app/refs';
+import { createEmptyRaceAnnotations, createInitialAppState } from './app/state';
+import {
+  setupAnnotationSubtabs,
+  setupTabSwitching,
+  syncDataTabAndActions,
+} from './app/tabs';
 import { SQLiteClient } from './db/sqliteClient';
 import { mountAnnotationHelper } from './features/annotations/annotationHelperView';
 import { mountAnnotationPanel } from './features/annotations/annotationPanel';
@@ -30,130 +43,18 @@ import type {
   AnnotationPayload,
   AnnotationStore,
   LapFilters,
-  LapRangeBounds,
   LapRow,
   LapTimeChartHandle,
   RaceAnnotations,
-  RaceRecord,
   SortColumn,
-  SortState,
   SummaryRow,
-  TimelineEvent,
 } from './types';
 import { closestElement, errorMessage, queryRequired } from './utils/dom';
 
 const isLocalEditingEnabled = import.meta.env.DEV;
 
-interface AppRefs {
-  appInitStatus: HTMLElement | null;
-  heroActionsHost: HTMLElement;
-  dataActions: HTMLElement;
-  dataActionsSlot: HTMLElement;
-  csvInput: HTMLInputElement;
-  sqliteInput: HTMLInputElement;
-  exportJson: HTMLButtonElement;
-  exportSqlite: HTMLButtonElement;
-  raceSelect: HTMLSelectElement;
-  driverFilter: HTMLSelectElement;
-  searchFilter: HTMLInputElement;
-  lapMin: HTMLInputElement;
-  lapMax: HTMLInputElement;
-  summaryGreenOnly: HTMLInputElement;
-  importStatus: HTMLElement;
-  summaryCards: HTMLElement;
-  tableBody: HTMLTableSectionElement;
-  table: HTMLTableElement;
-  helperContainer: HTMLElement;
-  annotationPanelContainer: HTMLElement;
-  timelineContainer: HTMLElement;
-  dataTabButton: HTMLButtonElement;
-  tabButtons: NodeListOf<HTMLButtonElement>;
-  tabContents: NodeListOf<HTMLElement>;
-  annotationSubtabButtons: NodeListOf<HTMLButtonElement>;
-  annotationSubtabContents: NodeListOf<HTMLElement>;
-}
-
-interface AppState {
-  db: SQLiteClient | null;
-  annotationStore: AnnotationStore | null;
-  races: RaceRecord[];
-  activeRaceId: string;
-  selectedLapId: string;
-  sort: SortState;
-  currentRows: LapRow[];
-  currentAnnotations: RaceAnnotations;
-  currentTimelineEvents: TimelineEvent[];
-  helperMode: boolean;
-  helperCurrentIndex: number;
-  helperAutoAdvance: boolean;
-  helperViewMode: 'queue' | 'form';
-  lapRangeBounds: LapRangeBounds | null;
-  lapRangeRaceId: string;
-  summaryGreenOnly: boolean;
-}
-
-const refs: AppRefs = {
-  appInitStatus: document.querySelector('#app-init-status'),
-  heroActionsHost: queryRequired<HTMLElement>('#hero-actions-host'),
-  dataActions: queryRequired<HTMLElement>('#data-actions'),
-  dataActionsSlot: queryRequired<HTMLElement>('#data-actions-slot'),
-  csvInput: queryRequired<HTMLInputElement>('#csv-input'),
-  sqliteInput: queryRequired<HTMLInputElement>('#sqlite-input'),
-  exportJson: queryRequired<HTMLButtonElement>('#export-json'),
-  exportSqlite: queryRequired<HTMLButtonElement>('#export-sqlite'),
-  raceSelect: queryRequired<HTMLSelectElement>('#race-select'),
-  driverFilter: queryRequired<HTMLSelectElement>('#driver-filter'),
-  searchFilter: queryRequired<HTMLInputElement>('#search-filter'),
-  lapMin: queryRequired<HTMLInputElement>('#lap-min'),
-  lapMax: queryRequired<HTMLInputElement>('#lap-max'),
-  summaryGreenOnly: queryRequired<HTMLInputElement>('#summary-green-only'),
-  importStatus: queryRequired<HTMLElement>('#import-status'),
-  summaryCards: queryRequired<HTMLElement>('#summary-cards'),
-  tableBody: queryRequired<HTMLTableSectionElement>('#lap-table-body'),
-  table: queryRequired<HTMLTableElement>('table'),
-  helperContainer: queryRequired<HTMLElement>('#annotation-helper-container'),
-  annotationPanelContainer: queryRequired<HTMLElement>(
-    '#annotation-panel-container',
-  ),
-  timelineContainer: queryRequired<HTMLElement>('#timeline-container'),
-  dataTabButton: queryRequired<HTMLButtonElement>('#data-tab-button'),
-  tabButtons: document.querySelectorAll('.tab-button'),
-  tabContents: document.querySelectorAll('.tab-content'),
-  annotationSubtabButtons: document.querySelectorAll(
-    '.annotation-subtab-button',
-  ),
-  annotationSubtabContents: document.querySelectorAll(
-    '.annotation-subtab-content',
-  ),
-};
-
-const state: AppState = {
-  db: null,
-  annotationStore: null,
-  races: [],
-  activeRaceId: '',
-  selectedLapId: '',
-  sort: {
-    column: 'lap_number',
-    direction: 'asc',
-  },
-  currentRows: [],
-  currentAnnotations: {
-    lapNotes: [],
-    taggedIncidents: [],
-    rangeEvents: [],
-    driverStints: [],
-    journalEntries: [],
-  },
-  currentTimelineEvents: [],
-  helperMode: false,
-  helperCurrentIndex: 0,
-  helperAutoAdvance: false,
-  helperViewMode: 'queue', // 'queue' or 'form'
-  lapRangeBounds: null,
-  lapRangeRaceId: '',
-  summaryGreenOnly: true,
-};
+const refs = createAppRefs();
+const state = createInitialAppState();
 
 const charts = {
   lapTime: null as LapTimeChartHandle | null,
@@ -489,127 +390,11 @@ function wireEvents(): void {
   window.addEventListener('resize', () => {
     charts.lapTime?.resize();
   });
-  setupTabSwitching();
-  setupAnnotationSubtabs();
-}
-
-function setupTabSwitching(): void {
-  const annotationsTabButton = Array.from(refs.tabButtons).find(
-    (btn) => btn.dataset.tab === 'annotations',
-  );
-  if (annotationsTabButton) {
-    annotationsTabButton.hidden = !isLocalEditingEnabled;
-  }
-
-  refs.tabButtons.forEach((button) => {
-    button.addEventListener('click', (event) => {
-      const clickedButton = event.currentTarget as HTMLButtonElement;
-      const tabName = clickedButton.dataset.tab;
-      if (!tabName) return;
-
-      // Update active button
-      refs.tabButtons.forEach((btn) => {
-        btn.classList.remove('active');
-      });
-      clickedButton.classList.add('active');
-
-      // Update active tab content
-      refs.tabContents.forEach((content) => {
-        content.classList.remove('active');
-      });
-      const activeTab = document.querySelector<HTMLElement>(`#${tabName}-tab`);
-      if (activeTab) {
-        activeTab.classList.add('active');
-        // Trigger chart resize if showing chart tab
-        if (tabName === 'chart') {
-          setTimeout(() => {
-            charts.lapTime?.resize();
-          }, 50);
-        }
-      }
-
-      // Save preference to localStorage
-      localStorage.setItem('activeTab', tabName);
-    });
+  setupTabSwitching(refs, {
+    isLocalEditingEnabled,
+    onChartTabShown: () => charts.lapTime?.resize(),
   });
-
-  // Restore saved tab preference
-  const savedTab = localStorage.getItem('activeTab') || 'chart';
-  const savedTabButton = Array.from(refs.tabButtons).find(
-    (btn) => btn.dataset.tab === savedTab && !btn.hidden,
-  );
-  if (savedTabButton) {
-    savedTabButton.click();
-  } else {
-    const chartTabButton = Array.from(refs.tabButtons).find(
-      (btn) => btn.dataset.tab === 'chart',
-    );
-    chartTabButton?.click();
-  }
-}
-
-function syncDataTabAndActions(): void {
-  const hasData = state.races.length > 0;
-
-  refs.dataTabButton.hidden = !hasData;
-
-  const activeDataButton = Array.from(refs.tabButtons).find(
-    (btn) => btn.dataset.tab === 'data' && btn.classList.contains('active'),
-  );
-  if (!hasData && activeDataButton) {
-    const chartButton = Array.from(refs.tabButtons).find(
-      (btn) => btn.dataset.tab === 'chart',
-    );
-    chartButton?.click();
-  }
-
-  const targetHost = hasData ? refs.dataActionsSlot : refs.heroActionsHost;
-  if (refs.dataActions.parentElement !== targetHost) {
-    targetHost.append(refs.dataActions);
-  }
-
-  refs.heroActionsHost.hidden = hasData;
-}
-
-function setupAnnotationSubtabs(): void {
-  refs.annotationSubtabButtons.forEach((button) => {
-    button.addEventListener('click', (event) => {
-      const clickedButton = event.currentTarget as HTMLButtonElement;
-      const subtabName = clickedButton.dataset.annotationTab;
-      if (!subtabName) return;
-
-      refs.annotationSubtabButtons.forEach((btn) => {
-        btn.classList.remove('active');
-        btn.setAttribute('aria-selected', 'false');
-      });
-      clickedButton.classList.add('active');
-      clickedButton.setAttribute('aria-selected', 'true');
-
-      refs.annotationSubtabContents.forEach((content) => {
-        content.classList.remove('active');
-        content.hidden = true;
-      });
-
-      const activeSubtab = document.querySelector<HTMLElement>(
-        `#annotation-${subtabName}-tab`,
-      );
-      if (activeSubtab) {
-        activeSubtab.classList.add('active');
-        activeSubtab.hidden = false;
-      }
-
-      localStorage.setItem('activeAnnotationSubtab', subtabName);
-    });
-  });
-
-  const savedSubtab =
-    localStorage.getItem('activeAnnotationSubtab') || 'editor';
-  const savedSubtabButton = Array.from(refs.annotationSubtabButtons).find(
-    (btn) => btn.dataset.annotationTab === savedSubtab,
-  );
-  if (savedSubtabButton) {
-    savedSubtabButton.click();
-  }
+  setupAnnotationSubtabs(refs);
 }
 
 async function handleImport(event: Event): Promise<void> {
@@ -620,29 +405,51 @@ async function handleImport(event: Event): Promise<void> {
   }
 
   const messages: string[] = [];
-  const db = getDb();
-  for (const file of files) {
-    const importOptions = promptForRaceImportOptions(file.name);
-    if (importOptions.cancelled) {
-      refs.csvInput.value = '';
-      setStatus(`Import cancelled before ${file.name}.`);
-      return;
+  let activeFileName = '';
+
+  try {
+    const db = getDb();
+    for (const file of files) {
+      activeFileName = file.name;
+      const importOptions = promptForRaceImportOptions(file.name);
+      if (importOptions.cancelled) {
+        input.value = '';
+        if (messages.length) {
+          await refreshRaceOptions();
+          await refreshView();
+          setStatus(
+            `Import stopped before ${file.name}. Completed: ${messages.join(' | ')}`,
+          );
+          return;
+        }
+
+        setStatus(`Import cancelled before ${file.name}.`);
+        return;
+      }
+
+      setStatus(`Importing ${file.name}...`);
+      const result = await importRace(db, file, {
+        raceStartTime: importOptions.raceStartTime,
+      });
+      messages.push(
+        `${result.raceName}: ${result.rowCount} laps${result.warnings.length ? ` (${result.warnings.length} repairs/warnings)` : ''}`,
+      );
+      state.activeRaceId = result.raceId;
     }
 
-    setStatus(`Importing ${file.name}...`);
-    const result = await importRace(db, file, {
-      raceStartTime: importOptions.raceStartTime,
-    });
-    messages.push(
-      `${result.raceName}: ${result.rowCount} laps${result.warnings.length ? ` (${result.warnings.length} repairs/warnings)` : ''}`,
+    input.value = '';
+    await refreshRaceOptions();
+    await refreshView();
+    setStatus(`Import complete. ${messages.join(' | ')}`);
+  } catch (error) {
+    console.error(error);
+    input.value = '';
+    await refreshRaceOptions();
+    await refreshView();
+    setStatus(
+      `Import failed${activeFileName ? ` for ${activeFileName}` : ''}: ${errorMessage(error)}`,
     );
-    state.activeRaceId = result.raceId;
   }
-
-  refs.csvInput.value = '';
-  await refreshRaceOptions();
-  await refreshView();
-  setStatus(`Import complete. ${messages.join(' | ')}`);
 }
 
 async function handleRestoreSqlite(event: Event): Promise<void> {
@@ -678,13 +485,14 @@ async function handleRestoreSqlite(event: Event): Promise<void> {
 
 async function refreshRaceOptions(): Promise<void> {
   state.races = getRaceList(getDb());
-  syncDataTabAndActions();
+  syncDataTabAndActions(refs, state.races.length > 0);
 
-  refs.raceSelect.innerHTML = state.races.length
-    ? state.races
-        .map((race) => `<option value="${race.id}">${race.name}</option>`)
-        .join('')
-    : '<option value="">No imported races</option>';
+  replaceSelectOptions(
+    refs.raceSelect,
+    state.races.length
+      ? state.races.map((race) => ({ value: race.id, label: race.name }))
+      : [{ value: '', label: 'No imported races' }],
+  );
 
   if (!state.activeRaceId && state.races.length) {
     state.activeRaceId = state.races[0].id;
@@ -699,13 +507,27 @@ async function refreshDriverOptions(): Promise<void> {
   const drivers = state.activeRaceId
     ? getDriverOptions(getDb(), state.activeRaceId)
     : [];
-  refs.driverFilter.innerHTML = [
-    '<option value="">All drivers</option>',
-    ...drivers.map((driver) => `<option value="${driver}">${driver}</option>`),
-  ].join('');
+  replaceSelectOptions(refs.driverFilter, [
+    { value: '', label: 'All drivers' },
+    ...drivers.map((driver) => ({ value: driver, label: driver })),
+  ]);
   refs.driverFilter.value = drivers.includes(selectedDriver)
     ? selectedDriver
     : '';
+}
+
+function replaceSelectOptions(
+  select: HTMLSelectElement,
+  options: Array<{ value: string; label: string }>,
+): void {
+  select.replaceChildren(
+    ...options.map((item) => {
+      const option = document.createElement('option');
+      option.value = item.value;
+      option.textContent = item.label;
+      return option;
+    }),
+  );
 }
 
 async function refreshView(
@@ -717,17 +539,11 @@ async function refreshView(
   if (!state.activeRaceId) {
     state.lapRangeBounds = null;
     state.lapRangeRaceId = '';
-    syncLapRangeInputs(null, { prefill: false });
+    syncLapRangeInputs(refs, null, { prefill: false });
     refs.summaryCards.innerHTML =
       '<div class="summary-card"><span>No race selected</span><strong>Import a CSV</strong></div>';
     renderLapTable(refs.tableBody, [], state.selectedLapId, null);
-    state.currentAnnotations = {
-      lapNotes: [],
-      taggedIncidents: [],
-      rangeEvents: [],
-      driverStints: [],
-      journalEntries: [],
-    };
+    state.currentAnnotations = createEmptyRaceAnnotations();
     state.currentTimelineEvents = [];
     if (annotationHelper) {
       annotationHelper.render(null);
@@ -737,13 +553,7 @@ async function refreshView(
         selectedLapRow: null,
         rows: [],
         raceStartTime: null,
-        annotations: {
-          lapNotes: [],
-          taggedIncidents: [],
-          rangeEvents: [],
-          driverStints: [],
-          journalEntries: [],
-        },
+        annotations: createEmptyRaceAnnotations(),
       });
     }
     if (timelineView) {
@@ -769,7 +579,7 @@ async function refreshView(
   };
   const lapSeries = getLapSeries(db, state.activeRaceId, chartFilters);
   const forceToBounds = state.lapRangeRaceId !== state.activeRaceId;
-  const { lapMin, lapMax } = syncLapRangeInputs(lapRangeBounds, {
+  const { lapMin, lapMax } = syncLapRangeInputs(refs, lapRangeBounds, {
     prefill: true,
     forceToBounds,
   });
@@ -813,9 +623,6 @@ async function refreshView(
     });
     lapTimeChart.setLapRange(filters.lapMin, filters.lapMax);
   }
-  // BUG FIX: charts.position was initialized but render() was never defined. Skip for now.
-  // charts.position.render(lapSeries, annotations, null);
-
   const selectedLapRow =
     rows.find((row) => row.id === state.selectedLapId) ?? null;
 
@@ -904,14 +711,17 @@ async function handleLapRangeZoom({
 
   refs.lapMin.value = nextMin == null ? '' : `${nextMin}`;
   refs.lapMax.value = nextMax == null ? '' : `${nextMax}`;
-  syncLapRangeInputs(state.lapRangeBounds, { prefill: true });
+  syncLapRangeInputs(refs, state.lapRangeBounds, { prefill: true });
   await refreshView({ skipChartRender: true });
 }
 
 async function handleLapRangeInput(
   changedField: 'lapMin' | 'lapMax',
 ): Promise<void> {
-  syncLapRangeInputs(state.lapRangeBounds, { prefill: true, changedField });
+  syncLapRangeInputs(refs, state.lapRangeBounds, {
+    prefill: true,
+    changedField,
+  });
   await refreshView();
 }
 
@@ -920,102 +730,6 @@ function getBaseFilters(): LapFilters {
     driver: refs.driverFilter.value,
     search: refs.searchFilter.value.trim(),
   };
-}
-
-function getLapBounds(rows: LapRow[]): LapRangeBounds | null {
-  if (!Array.isArray(rows) || !rows.length) {
-    return null;
-  }
-
-  const lapNumbers = rows
-    .map((row) => Number(row.lap_number))
-    .filter((lapNumber) => Number.isFinite(lapNumber));
-
-  if (!lapNumbers.length) {
-    return null;
-  }
-
-  return {
-    min: Math.min(...lapNumbers),
-    max: Math.max(...lapNumbers),
-  };
-}
-
-function syncLapRangeInputs(
-  bounds: LapRangeBounds | null,
-  options: {
-    prefill?: boolean;
-    changedField?: 'lapMin' | 'lapMax' | null;
-    forceToBounds?: boolean;
-  } = {},
-): { lapMin: number | null; lapMax: number | null } {
-  const {
-    prefill = false,
-    changedField = null,
-    forceToBounds = false,
-  } = options;
-
-  if (!bounds || !Number.isFinite(bounds.min) || !Number.isFinite(bounds.max)) {
-    refs.lapMin.removeAttribute('min');
-    refs.lapMin.removeAttribute('max');
-    refs.lapMax.removeAttribute('min');
-    refs.lapMax.removeAttribute('max');
-    return { lapMin: null, lapMax: null };
-  }
-
-  refs.lapMin.min = `${bounds.min}`;
-  refs.lapMin.max = `${bounds.max}`;
-  refs.lapMax.min = `${bounds.min}`;
-  refs.lapMax.max = `${bounds.max}`;
-
-  let lapMin = parseIntegerOrNull(refs.lapMin.value);
-  let lapMax = parseIntegerOrNull(refs.lapMax.value);
-
-  if (forceToBounds) {
-    lapMin = bounds.min;
-    lapMax = bounds.max;
-  }
-
-  if (prefill && lapMin == null) {
-    lapMin = bounds.min;
-  }
-
-  if (prefill && lapMax == null) {
-    lapMax = bounds.max;
-  }
-
-  if (lapMin != null) {
-    lapMin = clamp(lapMin, bounds.min, bounds.max);
-  }
-
-  if (lapMax != null) {
-    lapMax = clamp(lapMax, bounds.min, bounds.max);
-  }
-
-  if (lapMin != null && lapMax != null && lapMin > lapMax) {
-    if (changedField === 'lapMin') {
-      lapMax = lapMin;
-    } else if (changedField === 'lapMax') {
-      lapMin = lapMax;
-    } else {
-      lapMin = bounds.min;
-      lapMax = bounds.max;
-    }
-  }
-
-  refs.lapMin.value = lapMin == null ? '' : `${lapMin}`;
-  refs.lapMax.value = lapMax == null ? '' : `${lapMax}`;
-
-  return { lapMin, lapMax };
-}
-
-function parseIntegerOrNull(value: string): number | null {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
 
 async function handleLapSelectionByNumber(lapNumber: number): Promise<void> {
@@ -1083,48 +797,4 @@ function setStatus(message: string): void {
 function setAppLoadingState(isLoading: boolean): void {
   document.body.classList.toggle('app-loading', isLoading);
   document.body.classList.toggle('app-ready', !isLoading);
-}
-
-function datetimeLocalToIso(value: unknown): string | null {
-  const trimmed = `${value ?? ''}`.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const parsed = new Date(trimmed);
-  if (Number.isNaN(parsed.getTime())) {
-    return null;
-  }
-
-  return parsed.toISOString();
-}
-
-function promptForRaceImportOptions(fileName: string): {
-  cancelled: boolean;
-  raceStartTime: string | null;
-} {
-  while (true) {
-    const response = window.prompt(
-      `Race start time for ${fileName}\nEnter local time as YYYY-MM-DDTHH:mm.\nLeave blank to skip.`,
-      '',
-    );
-
-    if (response == null) {
-      return { cancelled: true, raceStartTime: null };
-    }
-
-    const trimmed = response.trim();
-    if (!trimmed) {
-      return { cancelled: false, raceStartTime: null };
-    }
-
-    const raceStartTime = datetimeLocalToIso(trimmed);
-    if (raceStartTime) {
-      return { cancelled: false, raceStartTime };
-    }
-
-    window.alert(
-      'Invalid race start time. Use YYYY-MM-DDTHH:mm, for example 2026-05-25T09:30.',
-    );
-  }
 }

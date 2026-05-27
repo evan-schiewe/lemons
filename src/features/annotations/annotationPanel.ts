@@ -572,7 +572,7 @@ function renderSelectedLapList<T>(
 function renderSelectedLapTaggedIncidentActions(item: TaggedIncident): string {
   return `
     <div class="selected-lap-item-actions">
-      <button class="button ghost" data-action="edit" data-kind="taggedIncident" data-id="${item.id}" type="button">Edit</button>
+      <button class="button ghost" data-action="edit" data-kind="taggedIncident" data-id="${escapeHtml(item.id)}" type="button">Edit</button>
     </div>
   `;
 }
@@ -822,8 +822,8 @@ function renderDriverStintItem(
 function renderItemActions(kind: PanelAnnotationKind, id: string): string {
   return `
     <div class="form-actions">
-      <button class="button ghost" data-action="edit" data-kind="${kind}" data-id="${id}" type="button">Edit</button>
-      <button class="button ghost" data-action="delete" data-kind="${kind}" data-id="${id}" type="button">Delete</button>
+      <button class="button ghost" data-action="edit" data-kind="${kind}" data-id="${escapeHtml(id)}" type="button">Edit</button>
+      <button class="button ghost" data-action="delete" data-kind="${kind}" data-id="${escapeHtml(id)}" type="button">Delete</button>
     </div>
   `;
 }

@@ -200,11 +200,12 @@ function renderQueueHeader(
 
   const contextLabel = `Lap ${escapeHtml(candidate.lap_number)}`;
   const driverLabel = escapeHtml(candidate.driver_name || 'Unknown driver');
-  const lapTimeMs = formatLapTimeHHMMSS(candidate.lap_time_ms);
-  const wallClockTime = formatWallClock(
-    raceStartTime,
-    candidate.lap_start_offset_ms,
+  const lapTimeMs = escapeHtml(formatLapTimeHHMMSS(candidate.lap_time_ms));
+  const wallClockTime = escapeHtml(
+    formatWallClock(raceStartTime, candidate.lap_start_offset_ms),
   );
+  const positionLabel = escapeHtml(candidate.position_value ?? '—');
+  const gapLabel = escapeHtml(candidate.gap_leader_display || '—');
 
   return `
     <div class="helper-header">
@@ -226,8 +227,8 @@ function renderQueueHeader(
         <div class="helper-metrics">
           <span class="helper-metric">Lap Time: ${lapTimeMs}</span>
           <span class="helper-metric">Time of Day: ${wallClockTime}</span>
-          <span class="helper-metric">Position: ${candidate.position_value ?? '—'}</span>
-          <span class="helper-metric">Gap: ${candidate.gap_leader_display || '—'}</span>
+          <span class="helper-metric">Position: ${positionLabel}</span>
+          <span class="helper-metric">Gap: ${gapLabel}</span>
         </div>
       </div>
       <div class="helper-status ${statusClass}">
@@ -397,8 +398,8 @@ function renderRangeEventItem(item: RangeEvent, kind: AnnotationKind): string {
 function renderItemActions(kind: AnnotationKind, id: string): string {
   return `
     <div class="form-actions">
-      <button class="button ghost" data-action="edit" data-kind="${kind}" data-id="${id}" type="button">Edit</button>
-      <button class="button ghost" data-action="delete" data-kind="${kind}" data-id="${id}" type="button">Delete</button>
+      <button class="button ghost" data-action="edit" data-kind="${kind}" data-id="${escapeHtml(id)}" type="button">Edit</button>
+      <button class="button ghost" data-action="delete" data-kind="${kind}" data-id="${escapeHtml(id)}" type="button">Delete</button>
     </div>
   `;
 }

@@ -42,10 +42,12 @@ export function parseDurationLike(value: unknown): ParsedDuration {
     .replace(/-?\d+(?:\.\d+)?\s*laps?/, ' ')
     .replace(/\b(behind|ahead|to leader|leader)\b/g, ' ')
     .replace(/[()]/g, ' ')
+    .replace(/^[\s,;:+]+|[\s,;:]+$/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 
-  const ms = parseClockish(withoutLapWords || normalized);
+  const ms =
+    laps !== null ? parseClockish(withoutLapWords) : parseClockish(normalized);
 
   if (laps !== null) {
     return {
