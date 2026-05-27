@@ -1,3 +1,4 @@
+import { ANNOTATION_COLOR_TOKENS } from '../../app/theme';
 import type {
   AnnotationHandlers,
   AnnotationPayload,
@@ -704,7 +705,7 @@ function renderIncidentForm(
         <label><span>Title</span><input name="title" required /></label>
         <label><span>Tag</span><input name="tag" placeholder="Spin, contact, FCY" required /></label>
         <label><span>Details</span><textarea name="details" rows="2"></textarea></label>
-        <label><span>Color</span><input name="color" type="color" value="#d94f2b" /></label>
+        <label><span>Color</span><input name="color" type="color" value="${ANNOTATION_COLOR_TOKENS.taggedIncident}" /></label>
         <div class="form-actions">
           <button class="button primary" type="submit">${isEditing ? 'Update Incident' : 'Save Incident'}</button>
           <button class="button ghost" data-action="clear" data-kind="taggedIncident" type="button">${isEditing ? 'Cancel Edit' : 'Close'}</button>
@@ -729,7 +730,7 @@ function renderRangeEventForm(
         <label><span>Title</span><input name="title" required /></label>
         <label><span>Tag</span><input name="tag" placeholder="FCY, caution, weather" required /></label>
         <label><span>Details</span><textarea name="details" rows="2"></textarea></label>
-        <label><span>Color</span><input name="color" type="color" value="#2563eb" /></label>
+        <label><span>Color</span><input name="color" type="color" value="${ANNOTATION_COLOR_TOKENS.rangeEvent}" /></label>
         <div class="form-actions">
           <button class="button primary" type="submit">${isEditing ? 'Update Range' : 'Save Range'}</button>
           <button class="button ghost" data-action="clear" data-kind="rangeEvent" type="button">${isEditing ? 'Cancel Edit' : 'Close'}</button>
@@ -753,7 +754,7 @@ function renderDriverStintForm(
         <label><span>Start Lap</span><input name="start_lap" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
         <label><span>End Lap</span><input name="end_lap" type="number" min="1" value="${selected?.lap_number ?? ''}" required /></label>
         <label><span>Notes</span><textarea name="notes" rows="2"></textarea></label>
-        <label><span>Color</span><input name="color" type="color" value="#059669" /></label>
+        <label><span>Color</span><input name="color" type="color" value="${ANNOTATION_COLOR_TOKENS.driverStint}" /></label>
         <div class="form-actions">
           <button class="button primary" type="submit">${isEditing ? 'Update Stint' : 'Save Stint'}</button>
           <button class="button ghost" data-action="clear" data-kind="driverStint" type="button">${isEditing ? 'Cancel Edit' : 'Close'}</button>
@@ -917,9 +918,9 @@ function buildDefaultValues(
     lap_number: selectedLapRow.lap_number,
     driver_name: selectedLapRow.driver_name,
     color: {
-      taggedIncident: '#d94f2b',
-      rangeEvent: '#2563eb',
-      driverStint: '#059669',
+      taggedIncident: ANNOTATION_COLOR_TOKENS.taggedIncident,
+      rangeEvent: ANNOTATION_COLOR_TOKENS.rangeEvent,
+      driverStint: ANNOTATION_COLOR_TOKENS.driverStint,
     }[readPanelKind(kind) ?? DEFAULT_KIND],
   };
 }

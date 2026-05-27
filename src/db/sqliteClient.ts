@@ -234,7 +234,7 @@ export class SQLiteClient {
                     event_time_source TEXT NOT NULL DEFAULT 'lap',
                     title TEXT,
                     entry_text TEXT NOT NULL,
-                    color TEXT NOT NULL DEFAULT '#7c3aed',
+                    color TEXT NOT NULL DEFAULT '#333733',
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )

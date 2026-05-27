@@ -1,3 +1,4 @@
+import { ANNOTATION_COLOR_TOKENS } from '../../app/theme';
 import type {
   AnnotationHandlers,
   JournalEntry,
@@ -53,7 +54,9 @@ export function mountTimelineView(
       event_time_source: manualDateTime ? 'manual' : 'lap',
       title: `${formData.get('title') ?? ''}`.trim(),
       entry_text: `${formData.get('entry_text') ?? ''}`.trim(),
-      color: `${formData.get('color') ?? ''}`.trim() || '#7c3aed',
+      color:
+        `${formData.get('color') ?? ''}`.trim() ||
+        ANNOTATION_COLOR_TOKENS.journalEntry,
     };
 
     const didSave = await handlers.onSave?.('journalEntry', payload);
@@ -242,7 +245,7 @@ function renderJournalForm(
             </label>
             <label>
                 <span>Color</span>
-                <input name="color" type="color" value="${escapeHtml(editingJournal?.color || '#7c3aed')}" />
+                <input name="color" type="color" value="${escapeHtml(editingJournal?.color || ANNOTATION_COLOR_TOKENS.journalEntry)}" />
             </label>
             <label>
                 <span>Journal Entry</span>
@@ -291,7 +294,7 @@ function renderEventCard(
   }
 
   return `
-        <article class="timeline-card" style="--event-color: ${escapeHtml(eventItem.color || '#6b7280')}">
+        <article class="timeline-card" style="--event-color: ${escapeHtml(eventItem.color || ANNOTATION_COLOR_TOKENS.fallback)}">
             <header class="timeline-card-header">
                 <div class="timeline-card-meta">
                     <span class="timeline-card-badge">${escapeHtml(eventItem.event_label || eventItem.event_type)}</span>
@@ -325,7 +328,7 @@ function renderDriverSwitchCard(
       : newDriverName || oldDriverName || 'Driver updated';
 
   return `
-        <article class="timeline-card timeline-card-driver-switch" style="--event-color: ${escapeHtml(eventItem.color || '#059669')}">
+        <article class="timeline-card timeline-card-driver-switch" style="--event-color: ${escapeHtml(eventItem.color || ANNOTATION_COLOR_TOKENS.driverStint)}">
             <header class="timeline-card-header">
                 <div class="timeline-card-meta">
                     <span class="timeline-card-badge">${escapeHtml(eventItem.event_label || eventItem.event_type)}</span>

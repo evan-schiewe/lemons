@@ -1,3 +1,4 @@
+import { ANNOTATION_COLOR_TOKENS } from '../../app/theme';
 import type {
   AnnotationHandlers,
   AnnotationHelperHandle,
@@ -140,7 +141,7 @@ export function mountAnnotationHelper(
           lap_number: selected.lap_number,
           driver_name: selected.driver_name,
           note_text: 'REVIEWED_NO_ACTION',
-          color: '#10b981',
+          color: ANNOTATION_COLOR_TOKENS.reviewed,
         });
       }
       return;
@@ -193,10 +194,10 @@ function renderQueueHeader(
     : 'helper-status-unreviewed';
   const typeColor =
     {
-      repair: '#7c3aed',
-      pit: '#f59e0b',
-      outlier: '#3b82f6',
-    }[candidate.candidate_type] || '#999';
+      repair: ANNOTATION_COLOR_TOKENS.repair,
+      pit: ANNOTATION_COLOR_TOKENS.pit,
+      outlier: ANNOTATION_COLOR_TOKENS.outlier,
+    }[candidate.candidate_type] || ANNOTATION_COLOR_TOKENS.fallback;
 
   const contextLabel = `Lap ${escapeHtml(candidate.lap_number)}`;
   const driverLabel = escapeHtml(candidate.driver_name || 'Unknown driver');

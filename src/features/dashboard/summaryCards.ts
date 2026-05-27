@@ -3,6 +3,7 @@ import { GridComponent, TooltipComponent } from 'echarts/components';
 import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { CallbackDataParams } from 'echarts/types/dist/shared';
+import { CHART_COLOR_TOKENS } from '../../app/theme';
 import type { LapRow, SummaryRow } from '../../types';
 import { escapeHtml, formatNumber } from '../../utils/format';
 import { formatDurationMs, formatLapTimeHHMMSS } from '../../utils/time';
@@ -485,7 +486,7 @@ function buildHistogramChartOption(
       nameTextStyle: compact
         ? undefined
         : {
-            color: '#6b5d4d',
+            color: CHART_COLOR_TOKENS.axisText,
             fontWeight: 600,
           },
       axisLabel: compact
@@ -502,7 +503,7 @@ function buildHistogramChartOption(
 
               return `${formatLapTimeHHMMSS(startMs)}\n${formatLapTimeHHMMSS(endMs)}`;
             },
-            color: '#6b5d4d',
+            color: CHART_COLOR_TOKENS.axisText,
             fontSize: 10,
             interval: 0,
             hideOverlap: false,
@@ -511,7 +512,7 @@ function buildHistogramChartOption(
           },
       axisLine: compact
         ? undefined
-        : { show: true, lineStyle: { color: '#8f7a60' } },
+        : { show: true, lineStyle: { color: CHART_COLOR_TOKENS.axisLine } },
       axisTick: compact ? undefined : { show: true },
     },
     yAxis: {
@@ -525,18 +526,20 @@ function buildHistogramChartOption(
           : 'Count (laps)',
       nameLocation: compact ? undefined : 'middle',
       nameGap: compact ? undefined : 56,
-      nameTextStyle: compact ? undefined : { color: '#6b5d4d' },
+      nameTextStyle: compact
+        ? undefined
+        : { color: CHART_COLOR_TOKENS.axisText },
       axisLabel: compact
         ? undefined
         : {
             show: true,
-            color: '#6b5d4d',
+            color: CHART_COLOR_TOKENS.axisText,
             formatter: (value: number) => `${formatNumber(value)} laps`,
             hideOverlap: false,
           },
       axisLine: compact
         ? undefined
-        : { show: true, lineStyle: { color: '#8f7a60' } },
+        : { show: true, lineStyle: { color: CHART_COLOR_TOKENS.axisLine } },
       axisTick: compact ? undefined : { show: true },
     },
     tooltip: {
@@ -589,7 +592,7 @@ function buildHistogramChartOption(
         data: seriesData,
         barCategoryGap: '24%',
         itemStyle: {
-          color: 'rgba(217, 79, 43, 0.82)',
+          color: CHART_COLOR_TOKENS.histogramBar,
           borderRadius: [2, 2, 0, 0],
         },
       },

@@ -9,6 +9,7 @@ import {
 } from 'echarts/components';
 import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
+import { CHART_COLOR_TOKENS, CHART_SERIES_PALETTE } from '../../app/theme';
 import type {
   DriverStint,
   LapNote,
@@ -35,22 +36,7 @@ echarts.use([
   CanvasRenderer,
 ]);
 
-const PALETTE = [
-  '#d94f2b',
-  '#2563eb',
-  '#059669',
-  '#9d174d',
-  '#7c3aed',
-  '#0f766e',
-];
-const GAP_PALETTE = [
-  '#7c3aed',
-  '#0f766e',
-  '#d97706',
-  '#be123c',
-  '#1d4ed8',
-  '#059669',
-];
+const PALETTE = [...CHART_SERIES_PALETTE];
 
 interface LapTimeChartHandlers {
   onSelectLap: (lapNumber: number) => void | Promise<void>;
@@ -199,7 +185,7 @@ export function createLapTimeChart(
           smooth: false,
           showSymbol: false,
           lineStyle: { width: 2 },
-          itemStyle: { color: PALETTE[0] },
+          itemStyle: { color: CHART_COLOR_TOKENS.lapLine },
           xAxisIndex: 0,
           yAxisIndex: 0,
           data: withGaps(
@@ -286,7 +272,7 @@ export function createLapTimeChart(
         'Incidents',
         annotations.taggedIncidents,
         0,
-        '#d94f2b',
+        CHART_COLOR_TOKENS.incidentMarker,
         1,
         1,
         'diamond',
@@ -295,7 +281,7 @@ export function createLapTimeChart(
         'Lap Notes',
         annotations.lapNotes,
         1,
-        '#f59e0b',
+        CHART_COLOR_TOKENS.lapNoteMarker,
         1,
         1,
         'circle',
@@ -307,7 +293,7 @@ export function createLapTimeChart(
           type: 'line',
           smooth: false,
           showSymbol: false,
-          itemStyle: { color: PALETTE[0] },
+          itemStyle: { color: CHART_COLOR_TOKENS.positionLine },
           lineStyle: { width: 2 },
           xAxisIndex: 2,
           yAxisIndex: 2,
@@ -328,7 +314,7 @@ export function createLapTimeChart(
           type: 'line',
           smooth: false,
           showSymbol: false,
-          itemStyle: { color: GAP_PALETTE[0] },
+          itemStyle: { color: CHART_COLOR_TOKENS.gapLine },
           lineStyle: { width: 2, type: 'dashed' },
           xAxisIndex: 2,
           yAxisIndex: 3,
@@ -712,7 +698,7 @@ function buildRangeAreas(rangeEvents: RangeEvent[]) {
       position: 'insideBottom',
       formatter: (params: MarkAreaLabelParam) =>
         params?.data?.[0]?.name ?? params?.name ?? '',
-      color: '#1f2937',
+      color: CHART_COLOR_TOKENS.labelText,
       backgroundColor: 'transparent',
       borderColor: 'transparent',
       borderWidth: 0,
