@@ -60,6 +60,29 @@ const RACE_ARTIFACT_RAW_ROW_COLUMNS = [
   'raw_gap_leader',
 ];
 
+const NORMALIZED_LAP_COLUMNS = [
+  'id',
+  'race_id',
+  'raw_row_id',
+  'lap_identity',
+  'lap_number',
+  'driver_name',
+  'lap_time_ms',
+  'lap_time_text',
+  'position_value',
+  'speed_mph',
+  'gap_ahead_ms',
+  'gap_ahead_laps',
+  'gap_ahead_display',
+  'gap_leader_ms',
+  'gap_leader_laps',
+  'gap_leader_display',
+  'rolling_median_ms',
+  'is_outlier',
+  'is_green_flag',
+  'search_text',
+];
+
 const RACE_ARTIFACT_SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
 
@@ -91,6 +114,48 @@ CREATE TABLE raw_lap_rows (
   raw_gap_leader TEXT,
   UNIQUE (race_id, row_index)
 );
+`;
+
+const NORMALIZED_LAPS_SCHEMA_SQL = `
+CREATE TABLE normalized_laps (
+  id TEXT PRIMARY KEY,
+  race_id TEXT NOT NULL REFERENCES races(id) ON DELETE CASCADE,
+  raw_row_id TEXT REFERENCES raw_lap_rows(id) ON DELETE SET NULL,
+  lap_identity TEXT NOT NULL UNIQUE,
+  lap_number INTEGER NOT NULL,
+  driver_name TEXT,
+  lap_time_ms INTEGER,
+  lap_time_text TEXT,
+  position_value REAL,
+  speed_mph REAL,
+  gap_ahead_ms INTEGER,
+  gap_ahead_laps REAL,
+  gap_ahead_display TEXT,
+  gap_leader_ms INTEGER,
+  gap_leader_laps REAL,
+  gap_leader_display TEXT,
+  rolling_median_ms INTEGER,
+  is_outlier INTEGER NOT NULL DEFAULT 0,
+  is_green_flag INTEGER NOT NULL DEFAULT 0,
+  search_text TEXT NOT NULL DEFAULT ''
+);
+`;
+
+const NORMALIZED_LAPS_EXPORT_VIEW_SQL = `
+CREATE VIEW normalized_laps_export AS
+SELECT
+  nl.*,
+  r.race_start_time,
+  COALESCE(
+    SUM(COALESCE(nl.lap_time_ms, 0)) OVER (
+      PARTITION BY nl.race_id
+      ORDER BY nl.lap_number ASC
+      ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+    ),
+    0
+  ) AS lap_start_offset_ms
+FROM normalized_laps nl
+JOIN races r ON r.id = nl.race_id;
 `;
 
 type SqlJsStatic = Awaited<ReturnType<typeof initSqlJs>>;
@@ -151,6 +216,10 @@ export class SQLiteClient {
       this.ensureColumn(database, 'races', columnDefinition);
     });
 
+    this.migrateRawLapRows(database);
+    this.migrateNormalizedLaps(database);
+    this.recreateNormalizedLapsExportView(database);
+
     const hasJournalEntriesTable = this.tableExists(
       database,
       'journal_entries',
@@ -191,6 +260,77 @@ export class SQLiteClient {
       this.ensureColumn(database, tableName, 'sync_server_sequence INTEGER');
       this.ensureColumn(database, tableName, 'sync_origin_client_id TEXT');
     });
+  }
+
+  migrateRawLapRows(database: SqlJsDatabase): void {
+    const columns = this.queryDatabase<{ name: string }>(
+      database,
+      'PRAGMA table_info(raw_lap_rows)',
+    );
+    const columnNames = new Set(columns.map((column) => column.name));
+    const hadRawEntry = columnNames.has('raw_entry');
+
+    if (!hadRawEntry) {
+      database.run('ALTER TABLE raw_lap_rows ADD COLUMN raw_entry TEXT');
+    }
+
+    if (columnNames.has('raw_car')) {
+      database.run(`
+        UPDATE raw_lap_rows
+        SET raw_entry = raw_car
+        WHERE raw_entry IS NULL AND raw_car IS NOT NULL
+      `);
+    }
+  }
+
+  migrateNormalizedLaps(database: SqlJsDatabase): void {
+    const columns = this.queryDatabase<{ name: string; notnull: number }>(
+      database,
+      'PRAGMA table_info(normalized_laps)',
+    );
+    const hasLegacyRequiredCarNumber = columns.some(
+      (column) => column.name === 'car_number' && Number(column.notnull) === 1,
+    );
+
+    if (!hasLegacyRequiredCarNumber) {
+      return;
+    }
+
+    const legacyColumnNames = new Set(columns.map((column) => column.name));
+    const copyColumns = NORMALIZED_LAP_COLUMNS.filter((column) =>
+      legacyColumnNames.has(column),
+    );
+
+    database.run('BEGIN');
+    try {
+      database.run('DROP VIEW IF EXISTS normalized_laps_export');
+      database.run('DROP TABLE IF EXISTS normalized_laps_legacy');
+      database.run(
+        'ALTER TABLE normalized_laps RENAME TO normalized_laps_legacy',
+      );
+      database.run(NORMALIZED_LAPS_SCHEMA_SQL);
+      database.run(`
+        INSERT INTO normalized_laps (${copyColumns.join(', ')})
+        SELECT ${copyColumns.join(', ')}
+        FROM normalized_laps_legacy
+      `);
+      database.run('DROP TABLE normalized_laps_legacy');
+      database.run(
+        'CREATE INDEX IF NOT EXISTS idx_normalized_laps_race_lap ON normalized_laps (race_id, lap_number)',
+      );
+      database.run(
+        'CREATE INDEX IF NOT EXISTS idx_normalized_laps_driver ON normalized_laps (race_id, driver_name)',
+      );
+      database.run('COMMIT');
+    } catch (error) {
+      database.run('ROLLBACK');
+      throw error;
+    }
+  }
+
+  recreateNormalizedLapsExportView(database: SqlJsDatabase): void {
+    database.run('DROP VIEW IF EXISTS normalized_laps_export');
+    database.run(NORMALIZED_LAPS_EXPORT_VIEW_SQL);
   }
 
   queryDatabase<T extends DbRow = DbRow>(
