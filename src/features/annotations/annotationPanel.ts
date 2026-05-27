@@ -601,9 +601,11 @@ function renderModal(
           </div>
           <button class="button ghost" data-action="close-modal" type="button">Close</button>
         </div>
-        ${renderFormSwitcher(activeKind)}
-        ${renderContextTable(rows || [], selected, raceStartTime)}
-        ${renderActiveForm(selected, activeEdit, activeKind)}
+        <div class="annotation-modal-body">
+          ${renderFormSwitcher(activeKind)}
+          ${renderContextTable(rows || [], selected, raceStartTime)}
+          ${renderActiveForm(selected, activeEdit, activeKind)}
+        </div>
       </section>
     </div>
   `;
@@ -645,7 +647,9 @@ function renderLapDetailsModal(viewModel: AnnotationPanelViewModel): string {
           </div>
           <button class="button ghost" data-action="close-modal" type="button">Close</button>
         </div>
-        ${detailsContent}
+        <div class="annotation-modal-body">
+          ${detailsContent}
+        </div>
       </section>
     </div>
   `;
