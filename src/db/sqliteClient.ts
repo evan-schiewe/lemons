@@ -269,6 +269,17 @@ export class SQLiteClient {
       this.ensureColumn(database, tableName, 'sync_server_sequence INTEGER');
       this.ensureColumn(database, tableName, 'sync_origin_client_id TEXT');
     });
+
+    this.ensureColumn(
+      database,
+      'tagged_incidents',
+      "media_json TEXT NOT NULL DEFAULT '[]'",
+    );
+    this.ensureColumn(
+      database,
+      'journal_entries',
+      "media_json TEXT NOT NULL DEFAULT '[]'",
+    );
   }
 
   migrateRawLapRows(database: SqlJsDatabase): void {

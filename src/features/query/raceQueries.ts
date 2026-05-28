@@ -281,6 +281,7 @@ export function getRaceTimelineEvents(
       driverName: lap?.display_driver_name || lap?.driver_name || null,
       title: item.title,
       body: [item.tag, item.details].filter(Boolean).join(' - '),
+      mediaJson: item.media_json,
       color: item.color || ANNOTATION_COLOR_TOKENS.taggedIncident,
       createdAt: item.created_at,
       updatedAt: item.updated_at,
@@ -346,6 +347,7 @@ export function getRaceTimelineEvents(
       driverName: lap?.display_driver_name || lap?.driver_name || null,
       title: item.title || 'Journal Entry',
       body: item.entry_text,
+      mediaJson: item.media_json,
       color: item.color || ANNOTATION_COLOR_TOKENS.journalEntry,
       createdAt: item.created_at,
       updatedAt: item.updated_at,
@@ -650,6 +652,7 @@ interface BuildTimelineEventInput {
   newDriverName?: string | null;
   title?: string | null;
   body?: string | null;
+  mediaJson?: string | null;
   color?: string;
   createdAt?: string | null;
   updatedAt?: string | null;
@@ -671,6 +674,7 @@ function buildTimelineEvent({
   newDriverName = null,
   title = '',
   body = '',
+  mediaJson = null,
   color = ANNOTATION_COLOR_TOKENS.fallback,
   createdAt = null,
   updatedAt = null,
@@ -711,6 +715,7 @@ function buildTimelineEvent({
     new_driver_name: newDriverName || null,
     title: title || eventLabel,
     body: body || '',
+    media_json: mediaJson,
     color,
     event_time_iso: effectiveEventTimeIso,
     event_time_source: resolvedEventTimeSource,

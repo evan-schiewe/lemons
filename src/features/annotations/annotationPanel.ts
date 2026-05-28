@@ -9,9 +9,18 @@ import type {
   RangeEvent,
   TaggedIncident,
 } from '../../types';
-import { closestElement } from '../../utils/dom';
+import { closestElement, errorMessage } from '../../utils/dom';
 import { escapeHtml, formatNumber, formatSpeed } from '../../utils/format';
 import { formatDurationMs, formatWallClock } from '../../utils/time';
+import {
+  getFormMediaAttachments,
+  MAX_MEDIA_ATTACHMENTS,
+  parseMediaAttachments,
+  renderMediaAttachmentEditor,
+  renderMediaAttachmentGallery,
+  setFormMediaAttachments,
+  updateFormMediaAttachmentText,
+} from '../media/media';
 
 interface KindConfig {
   formId: string;
@@ -243,11 +252,20 @@ export function mountAnnotationPanel(
       state.isModalOpen = false;
       state.activeEdit = null;
       state.prefillValues = null;
-      renderCurrentPanel(container, state);
+      renderCurrentPanel(container, state, handlers);
     }
   }
 
-  function handleChange(event: Event) {
+  async function handleChange(event: Event) {
+    const mediaInput = closestElement<HTMLInputElement>(
+      event.target,
+      'input[data-action="media-upload"]',
+    );
+    if (mediaInput) {
+      await handleMediaUploadInput(mediaInput);
+      return;
+    }
+
     const selector = closestElement<HTMLSelectElement>(
       event.target,
       '[data-action="switch-kind"]',
@@ -258,17 +276,91 @@ export function mountAnnotationPanel(
 
     state.activeKind = readPanelKind(selector.value) ?? DEFAULT_KIND;
     state.activeEdit = null;
-    renderCurrentPanel(container, state);
+    renderCurrentPanel(container, state, handlers);
     hydrateActiveForm(
       state.modalRoot,
       state.viewModel,
       state.activeKind,
       null,
       state.prefillValues,
+      Boolean(handlers.isMediaUploadEnabled?.()),
     );
   }
 
+  async function handleMediaUploadInput(input: HTMLInputElement) {
+    const form = closestElement<HTMLFormElement>(input, 'form[data-kind]');
+    const status = form?.querySelector<HTMLElement>('[data-media-status]');
+    const files = Array.from(input.files ?? []);
+    if (!form || !files.length) {
+      return;
+    }
+
+    if (!handlers.onUploadMedia || !handlers.isMediaUploadEnabled?.()) {
+      if (status) {
+        status.textContent = 'Cloud media upload is not available.';
+      }
+      input.value = '';
+      return;
+    }
+
+    const existing = getFormMediaAttachments(form);
+    const remaining = MAX_MEDIA_ATTACHMENTS - existing.length;
+    if (remaining <= 0) {
+      if (status) {
+        status.textContent = 'Image limit reached.';
+      }
+      input.value = '';
+      return;
+    }
+
+    const selectedFiles = files.slice(0, remaining);
+    if (status) {
+      status.textContent = `Uploading ${selectedFiles.length} image${selectedFiles.length === 1 ? '' : 's'}...`;
+    }
+
+    try {
+      const uploaded = await handlers.onUploadMedia(selectedFiles);
+      setFormMediaAttachments(
+        form,
+        [...existing, ...uploaded],
+        Boolean(handlers.isMediaUploadEnabled?.()),
+      );
+      if (status) {
+        status.textContent = `Uploaded ${uploaded.length} image${uploaded.length === 1 ? '' : 's'}.`;
+      }
+    } catch (error) {
+      if (status) {
+        status.textContent = `Upload failed: ${errorMessage(error)}`;
+      }
+    } finally {
+      input.value = '';
+    }
+  }
+
   function handleLapNumberChange(event: Event) {
+    const mediaTextInput = closestElement<HTMLInputElement>(
+      event.target,
+      'input[data-action="media-caption"], input[data-action="media-alt"]',
+    );
+    if (mediaTextInput) {
+      const form = closestElement<HTMLFormElement>(
+        mediaTextInput,
+        'form[data-kind]',
+      );
+      const assetId = mediaTextInput.dataset.assetId;
+      const field =
+        mediaTextInput.dataset.action === 'media-alt' ? 'altText' : 'caption';
+      if (form && assetId) {
+        updateFormMediaAttachmentText(
+          form,
+          assetId,
+          field,
+          mediaTextInput.value,
+        );
+      }
+      return;
+    }
+
     if (state.modalView !== 'form') {
       return;
     }
@@ -321,6 +413,21 @@ export function mountAnnotationPanel(
     const action = button.dataset.action;
     const kind = readPanelKind(button.dataset.kind);
 
+    if (action === 'detach-media') {
+      const form = closestElement<HTMLFormElement>(button, 'form[data-kind]');
+      const assetId = button.dataset.assetId;
+      if (form && assetId) {
+        setFormMediaAttachments(
+          form,
+          getFormMediaAttachments(form).filter(
+            (attachment) => attachment.assetId !== assetId,
+          ),
+          Boolean(handlers.isMediaUploadEnabled?.()),
+        );
+      }
+      return;
+    }
+
     if (action === 'delete' && kind) {
       const id = button.dataset.id;
       if (id) {
@@ -335,13 +442,14 @@ export function mountAnnotationPanel(
       state.activeEdit = null;
       state.prefillValues = null;
       state.activeKind = kind ?? state.activeKind;
-      renderCurrentPanel(container, state);
+      renderCurrentPanel(container, state, handlers);
       hydrateActiveForm(
         state.modalRoot,
         state.viewModel,
         state.activeKind,
         null,
         state.prefillValues,
+        Boolean(handlers.isMediaUploadEnabled?.()),
       );
       return;
     }
@@ -351,7 +459,7 @@ export function mountAnnotationPanel(
       state.modalView = 'form';
       state.activeEdit = null;
       state.prefillValues = null;
-      renderCurrentPanel(container, state);
+      renderCurrentPanel(container, state, handlers);
       return;
     }
 
@@ -363,8 +471,15 @@ export function mountAnnotationPanel(
       state.isModalOpen = true;
       state.modalView = 'form';
       state.prefillValues = null;
-      renderCurrentPanel(container, state);
-      hydrateActiveForm(state.modalRoot, state.viewModel, kind, item);
+      renderCurrentPanel(container, state, handlers);
+      hydrateActiveForm(
+        state.modalRoot,
+        state.viewModel,
+        kind,
+        item,
+        null,
+        Boolean(handlers.isMediaUploadEnabled?.()),
+      );
       return;
     }
 
@@ -374,7 +489,7 @@ export function mountAnnotationPanel(
       state.modalView = 'form';
       state.prefillValues = null;
       state.activeKind = kind;
-      renderCurrentPanel(container, state);
+      renderCurrentPanel(container, state, handlers);
     }
   }
 
@@ -396,7 +511,7 @@ export function mountAnnotationPanel(
         state.activeEdit = nextItem ? state.activeEdit : null;
       }
 
-      renderCurrentPanel(container, state);
+      renderCurrentPanel(container, state, handlers);
 
       if (state.isModalOpen && state.modalView === 'form') {
         hydrateActiveForm(
@@ -411,6 +526,7 @@ export function mountAnnotationPanel(
               )
             : null,
           state.prefillValues,
+          Boolean(handlers.isMediaUploadEnabled?.()),
           false,
         );
       }
@@ -424,13 +540,14 @@ export function mountAnnotationPanel(
       state.isModalOpen = true;
       state.modalView = 'form';
       state.prefillValues = options.prefill ?? null;
-      renderCurrentPanel(container, state);
+      renderCurrentPanel(container, state, handlers);
       hydrateActiveForm(
         state.modalRoot,
         state.viewModel,
         state.activeKind,
         null,
         state.prefillValues,
+        Boolean(handlers.isMediaUploadEnabled?.()),
       );
     },
     openEditor(kind: string, id: string) {
@@ -448,8 +565,15 @@ export function mountAnnotationPanel(
       state.isModalOpen = true;
       state.modalView = 'form';
       state.prefillValues = null;
-      renderCurrentPanel(container, state);
-      hydrateActiveForm(state.modalRoot, state.viewModel, panelKind, item);
+      renderCurrentPanel(container, state, handlers);
+      hydrateActiveForm(
+        state.modalRoot,
+        state.viewModel,
+        panelKind,
+        item,
+        null,
+        Boolean(handlers.isMediaUploadEnabled?.()),
+      );
     },
     openLapDetails(viewModel: Partial<AnnotationPanelViewModel> | null) {
       const safeViewModel: AnnotationPanelViewModel = {
@@ -470,7 +594,7 @@ export function mountAnnotationPanel(
       state.prefillValues = null;
       state.isModalOpen = true;
       state.modalView = 'lapDetails';
-      renderCurrentPanel(container, state);
+      renderCurrentPanel(container, state, handlers);
     },
   };
 }
@@ -478,6 +602,7 @@ export function mountAnnotationPanel(
 function renderCurrentPanel(
   container: HTMLElement,
   state: AnnotationPanelState,
+  handlers: AnnotationHandlers,
 ): void {
   container.innerHTML = renderPanel(state.viewModel, state.activeEdit);
   state.modalRoot.innerHTML = state.isModalOpen
@@ -486,6 +611,7 @@ function renderCurrentPanel(
         state.activeEdit,
         state.activeKind,
         state.modalView,
+        Boolean(handlers.isMediaUploadEnabled?.()),
       )
     : '';
   document.body.classList.toggle('annotation-modal-open', state.isModalOpen);
@@ -583,6 +709,7 @@ function renderModal(
   activeEdit: ActiveEdit | null,
   activeKind: PanelAnnotationKind,
   modalView: AnnotationPanelState['modalView'] = 'form',
+  canUploadMedia = false,
 ): string {
   if (modalView === 'lapDetails') {
     return renderLapDetailsModal(viewModel);
@@ -605,7 +732,7 @@ function renderModal(
         <div class="annotation-modal-body">
           ${renderFormSwitcher(activeKind)}
           ${renderContextTable(rows || [], selected, raceStartTime)}
-          ${renderActiveForm(selected, activeEdit, activeKind)}
+          ${renderActiveForm(selected, activeEdit, activeKind, canUploadMedia)}
         </div>
       </section>
     </div>
@@ -625,7 +752,7 @@ function renderLapDetailsModal(viewModel: AnnotationPanelViewModel): string {
             'Tagged Incidents',
             details.taggedIncidents,
             (item) =>
-              `<strong>${escapeHtml(item.tag)}</strong> · ${escapeHtml(item.title || 'Untitled')}<div class="annotation-meta">${escapeHtml(item.details || 'No details')}</div>`,
+              `<strong>${escapeHtml(item.tag)}</strong> · ${escapeHtml(item.title || 'Untitled')}<div class="annotation-meta">${escapeHtml(item.details || 'No details')}</div>${renderMediaAttachmentGallery(item.media_json)}`,
             (item) => renderSelectedLapTaggedIncidentActions(item),
           )}
           ${renderSelectedLapList('Range Events Covering Lap', details.rangeEvents, (item) => `<strong>${escapeHtml(item.tag)}</strong> · Laps ${escapeHtml(item.start_lap)}-${escapeHtml(item.end_lap)}<div class="annotation-meta">${escapeHtml(item.title || 'Untitled')}</div>`)}
@@ -679,6 +806,7 @@ function renderActiveForm(
   selected: LapRow | null,
   activeEdit: ActiveEdit | null,
   activeKind: PanelAnnotationKind,
+  canUploadMedia: boolean,
 ): string {
   if (activeKind === 'rangeEvent') {
     return renderRangeEventForm(selected, activeEdit);
@@ -688,12 +816,13 @@ function renderActiveForm(
     return renderDriverStintForm(selected, activeEdit);
   }
 
-  return renderIncidentForm(selected, activeEdit);
+  return renderIncidentForm(selected, activeEdit, canUploadMedia);
 }
 
 function renderIncidentForm(
   selected: LapRow | null,
   activeEdit: ActiveEdit | null,
+  canUploadMedia: boolean,
 ): string {
   const isEditing = activeEdit?.kind === 'taggedIncident';
   return `
@@ -705,6 +834,7 @@ function renderIncidentForm(
         <label><span>Title</span><input name="title" required /></label>
         <label><span>Tag</span><input name="tag" placeholder="Spin, contact, FCY" required /></label>
         <label><span>Details</span><textarea name="details" rows="2"></textarea></label>
+        ${renderMediaAttachmentEditor('[]', canUploadMedia)}
         <label><span>Color</span><input name="color" type="color" value="${ANNOTATION_COLOR_TOKENS.taggedIncident}" /></label>
         <div class="form-actions">
           <button class="button primary" type="submit">${isEditing ? 'Update Incident' : 'Save Incident'}</button>
@@ -792,6 +922,7 @@ function renderTaggedIncidentItem(
       <strong>Lap ${escapeHtml(item.lap_number)} · ${escapeHtml(item.tag)}</strong>
       <p>${escapeHtml(item.title)}</p>
       <div class="annotation-meta">${escapeHtml(item.details || 'No details')}</div>
+      ${renderMediaAttachmentGallery(item.media_json)}
       ${renderItemActions(kind, item.id)}
     </article>
   `;
@@ -881,6 +1012,7 @@ function hydrateForm(
   item: PanelItem | null,
   selectedLapRow: LapRow | null,
   prefillValues: AnnotationPayload | null = null,
+  canUploadMedia = false,
 ): void {
   if (!form) {
     return;
@@ -902,6 +1034,14 @@ function hydrateForm(
       field.value = `${value ?? ''}`;
     }
   });
+
+  if (form.dataset.kind === 'taggedIncident') {
+    setFormMediaAttachments(
+      form,
+      parseMediaAttachments((defaults as Record<string, unknown>).media_json),
+      canUploadMedia,
+    );
+  }
 }
 
 function buildDefaultValues(
@@ -961,12 +1101,19 @@ function hydrateActiveForm(
   kind: PanelAnnotationKind,
   item: PanelItem | null,
   prefillValues: AnnotationPayload | null = null,
+  canUploadMedia = false,
   shouldFocus = true,
 ): void {
   const form = container.querySelector<HTMLFormElement>(
     `form[data-kind="${kind}"]`,
   );
-  hydrateForm(form, item, viewModel?.selectedLapRow, prefillValues);
+  hydrateForm(
+    form,
+    item,
+    viewModel?.selectedLapRow,
+    prefillValues,
+    canUploadMedia,
+  );
 
   if (shouldFocus) {
     focusAndRevealForm(form);

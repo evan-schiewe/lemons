@@ -1,10 +1,13 @@
 import type { SQLiteClient } from '../../db/sqliteClient';
 import type {
+  MediaAttachment,
   SyncConfig,
   SyncConnectionStatus,
   SyncMode,
   SyncSession,
 } from '../../types';
+import { readMediaBaseUrl } from '../media/media';
+import { prepareMediaUpload } from '../media/mediaUpload';
 import { SYNC_PUSH_BATCH_SIZE, SyncApiClient, SyncAuthError } from './syncApi';
 import {
   appendRaceOutboxMutation,
@@ -18,6 +21,7 @@ import {
   getPendingRaceOutbox,
   getRaceCursorRequests,
   getRaceIdByRaceKey,
+  getRaceKeyForRaceId,
   getRaceMetadataForSync,
   getSyncConfig,
   markOutboxAccepted,
@@ -237,6 +241,50 @@ export class SyncController {
 
     await appendRaceOutboxMutation(this.db, this.config, raceKey);
     await this.syncNow();
+  }
+
+  canUploadMedia(): boolean {
+    return Boolean(
+      this.mode === 'cloud-connected' &&
+        this.api &&
+        this.config &&
+        this.session?.scopes.includes('media:write') &&
+        readMediaBaseUrl(),
+    );
+  }
+
+  async uploadMediaFiles(
+    raceId: string,
+    files: File[],
+  ): Promise<MediaAttachment[]> {
+    if (!this.api || !this.config || !this.session || !this.canUploadMedia()) {
+      throw new Error(
+        'Cloud media uploads require a connected media write token.',
+      );
+    }
+
+    const raceKey = getRaceKeyForRaceId(this.db, raceId);
+    if (!raceKey) {
+      throw new Error('Selected race is not available for media upload.');
+    }
+
+    const attachments: MediaAttachment[] = [];
+    for (const file of files) {
+      const prepared = await prepareMediaUpload(file);
+      const response = await this.api.uploadMedia(
+        this.config.client_id,
+        crypto.randomUUID(),
+        raceKey,
+        prepared,
+      );
+      attachments.push({
+        ...response.asset,
+        caption: '',
+        altText: '',
+      });
+    }
+
+    return attachments;
   }
 
   private async resolveToken(token: string): Promise<void> {

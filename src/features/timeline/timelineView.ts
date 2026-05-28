@@ -6,8 +6,16 @@ import type {
   TimelineViewHandle,
   TimelineViewModel,
 } from '../../types';
-import { closestElement } from '../../utils/dom';
+import { closestElement, errorMessage } from '../../utils/dom';
 import { escapeHtml } from '../../utils/format';
+import {
+  getFormMediaAttachments,
+  MAX_MEDIA_ATTACHMENTS,
+  renderMediaAttachmentEditor,
+  renderMediaAttachmentGallery,
+  setFormMediaAttachments,
+  updateFormMediaAttachmentText,
+} from '../media/media';
 
 interface TimelineHandlers extends Partial<AnnotationHandlers> {
   onSelectLap?: (lapNumber: number) => void | Promise<void>;
@@ -71,6 +79,7 @@ export function mountTimelineView(
       event_time_source: manualDateTime ? 'manual' : 'lap',
       title: `${formData.get('title') ?? ''}`.trim(),
       entry_text: `${formData.get('entry_text') ?? ''}`.trim(),
+      media_json: `${formData.get('media_json') ?? '[]'}`,
       color:
         `${formData.get('color') ?? ''}`.trim() ||
         ANNOTATION_COLOR_TOKENS.journalEntry,
@@ -80,7 +89,38 @@ export function mountTimelineView(
     if (didSave) {
       state.editingJournalId = null;
       state.isComposerExpanded = false;
-      renderCurrent(container, state);
+      renderCurrent(container, state, handlers);
+    }
+  });
+
+  container.addEventListener('change', async (event: Event) => {
+    const mediaInput = closestElement<HTMLInputElement>(
+      event.target,
+      'input[data-action="media-upload"]',
+    );
+    if (mediaInput) {
+      await handleMediaUploadInput(mediaInput);
+    }
+  });
+
+  container.addEventListener('input', (event: Event) => {
+    const mediaTextInput = closestElement<HTMLInputElement>(
+      event.target,
+      'input[data-action="media-caption"], input[data-action="media-alt"]',
+    );
+    if (!mediaTextInput) {
+      return;
+    }
+
+    const form = closestElement<HTMLFormElement>(
+      mediaTextInput,
+      'form[data-action="journal-form"]',
+    );
+    const assetId = mediaTextInput.dataset.assetId;
+    const field =
+      mediaTextInput.dataset.action === 'media-alt' ? 'altText' : 'caption';
+    if (form && assetId) {
+      updateFormMediaAttachmentText(form, assetId, field, mediaTextInput.value);
     }
   });
 
@@ -103,6 +143,7 @@ export function mountTimelineView(
         'delete-journal',
         'close-composer',
         'cancel-edit-journal',
+        'detach-media',
       ].includes(action)
     ) {
       return;
@@ -111,27 +152,45 @@ export function mountTimelineView(
     if (action === 'edit-journal') {
       state.editingJournalId = button.dataset.id || null;
       state.isComposerExpanded = true;
-      renderCurrent(container, state);
+      renderCurrent(container, state, handlers);
       return;
     }
 
     if (action === 'cancel-edit-journal') {
       state.editingJournalId = null;
       state.isComposerExpanded = false;
-      renderCurrent(container, state);
+      renderCurrent(container, state, handlers);
       return;
     }
 
     if (action === 'open-composer') {
       state.isComposerExpanded = true;
-      renderCurrent(container, state);
+      renderCurrent(container, state, handlers);
       return;
     }
 
     if (action === 'close-composer') {
       state.isComposerExpanded = false;
       state.editingJournalId = null;
-      renderCurrent(container, state);
+      renderCurrent(container, state, handlers);
+      return;
+    }
+
+    if (action === 'detach-media') {
+      const form = closestElement<HTMLFormElement>(
+        button,
+        'form[data-action="journal-form"]',
+      );
+      const assetId = button.dataset.assetId;
+      if (form && assetId) {
+        setFormMediaAttachments(
+          form,
+          getFormMediaAttachments(form).filter(
+            (attachment) => attachment.assetId !== assetId,
+          ),
+          Boolean(handlers.isMediaUploadEnabled?.()),
+        );
+      }
       return;
     }
 
@@ -163,7 +222,7 @@ export function mountTimelineView(
         state.editingJournalId = null;
       }
 
-      renderCurrent(container, state);
+      renderCurrent(container, state, handlers);
     },
     setLocalEditingEnabled(isEnabled: boolean) {
       state.isLocalEditingEnabled = isEnabled;
@@ -171,12 +230,69 @@ export function mountTimelineView(
         state.editingJournalId = null;
         state.isComposerExpanded = false;
       }
-      renderCurrent(container, state);
+      renderCurrent(container, state, handlers);
     },
   };
+
+  async function handleMediaUploadInput(input: HTMLInputElement) {
+    const form = closestElement<HTMLFormElement>(
+      input,
+      'form[data-action="journal-form"]',
+    );
+    const status = form?.querySelector<HTMLElement>('[data-media-status]');
+    const files = Array.from(input.files ?? []);
+    if (!form || !files.length) {
+      return;
+    }
+
+    if (!handlers.onUploadMedia || !handlers.isMediaUploadEnabled?.()) {
+      if (status) {
+        status.textContent = 'Cloud media upload is not available.';
+      }
+      input.value = '';
+      return;
+    }
+
+    const existing = getFormMediaAttachments(form);
+    const remaining = MAX_MEDIA_ATTACHMENTS - existing.length;
+    if (remaining <= 0) {
+      if (status) {
+        status.textContent = 'Image limit reached.';
+      }
+      input.value = '';
+      return;
+    }
+
+    const selectedFiles = files.slice(0, remaining);
+    if (status) {
+      status.textContent = `Uploading ${selectedFiles.length} image${selectedFiles.length === 1 ? '' : 's'}...`;
+    }
+
+    try {
+      const uploaded = await handlers.onUploadMedia(selectedFiles);
+      setFormMediaAttachments(
+        form,
+        [...existing, ...uploaded],
+        Boolean(handlers.isMediaUploadEnabled?.()),
+      );
+      if (status) {
+        status.textContent = `Uploaded ${uploaded.length} image${uploaded.length === 1 ? '' : 's'}.`;
+      }
+    } catch (error) {
+      if (status) {
+        status.textContent = `Upload failed: ${errorMessage(error)}`;
+      }
+    } finally {
+      input.value = '';
+    }
+  }
 }
 
-function renderCurrent(container: HTMLElement, state: TimelineState): void {
+function renderCurrent(
+  container: HTMLElement,
+  state: TimelineState,
+  handlers: TimelineHandlers,
+): void {
   const viewModel = state.viewModel;
   if (!viewModel) {
     resetTimelineBandObserver(state);
@@ -190,6 +306,9 @@ function renderCurrent(container: HTMLElement, state: TimelineState): void {
         (item) => item.id === state.editingJournalId,
       ) || null
     : null;
+  const canUploadMedia = Boolean(
+    state.isLocalEditingEnabled && handlers.isMediaUploadEnabled?.(),
+  );
 
   container.innerHTML = `
         <div class="timeline-layout">
@@ -200,7 +319,7 @@ function renderCurrent(container: HTMLElement, state: TimelineState): void {
               state.isLocalEditingEnabled
                 ? `
             <aside class="timeline-composer-rail">
-                ${state.isComposerExpanded ? renderComposerExpanded(viewModel, editingJournal) : renderComposerCollapsed()}
+                ${state.isComposerExpanded ? renderComposerExpanded(viewModel, editingJournal, canUploadMedia) : renderComposerCollapsed()}
             </aside>
             `
                 : ''
@@ -228,6 +347,7 @@ function renderComposerCollapsed(): string {
 function renderComposerExpanded(
   viewModel: TimelineViewModel,
   editingJournal: JournalEntry | null,
+  canUploadMedia: boolean,
 ): string {
   return `
         <section class="timeline-composer panel" aria-live="polite">
@@ -236,7 +356,7 @@ function renderComposerExpanded(
                 <button type="button" class="button ghost" data-action="close-composer" aria-label="Minimize journal composer">Minimize</button>
             </div>
             <p class="panel-subtitle timeline-composer-subtitle">Capture race notes with lap-linked or manual timestamps.</p>
-            ${renderJournalForm(viewModel, editingJournal)}
+            ${renderJournalForm(viewModel, editingJournal, canUploadMedia)}
         </section>
     `;
 }
@@ -244,6 +364,7 @@ function renderComposerExpanded(
 function renderJournalForm(
   viewModel: TimelineViewModel,
   editingJournal: JournalEntry | null,
+  canUploadMedia: boolean,
 ): string {
   const selectedLap = viewModel.selectedLapRow || null;
   // Do not auto-assign a lap for new journal entries.
@@ -279,6 +400,7 @@ function renderJournalForm(
                 <span>Journal Entry</span>
                 <textarea name="entry_text" rows="5" placeholder="What happened and why it matters...">${escapeHtml(editingJournal?.entry_text || '')}</textarea>
             </label>
+            ${renderMediaAttachmentEditor(editingJournal?.media_json ?? '[]', canUploadMedia)}
             <div class="form-actions">
                 <button type="submit" class="button primary">${editingJournal ? 'Update Journal' : 'Save Journal'}</button>
                 ${editingJournal ? '<button type="button" class="button ghost" data-action="cancel-edit-journal">Cancel Edit</button>' : ''}
@@ -736,6 +858,7 @@ function renderEventCard(
             </header>
             <h4 class="timeline-card-title">${escapeHtml(eventItem.title || 'Untitled Event')}</h4>
             ${eventItem.body ? `<p class="timeline-card-body">${escapeHtml(eventItem.body)}</p>` : ''}
+            ${renderMediaAttachmentGallery(eventItem.media_json)}
         </article>
     `;
 }

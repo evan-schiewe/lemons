@@ -5,6 +5,7 @@ import type {
   AnnotationStore,
   SqlValue,
 } from '../../types';
+import { normalizeMediaJson } from '../media/media';
 
 export interface AnnotationTableConfig {
   table: string;
@@ -33,6 +34,7 @@ export const ANNOTATION_TABLE_CONFIG = {
       'tag',
       'color',
       'details',
+      'media_json',
       'created_at',
       'updated_at',
     ],
@@ -73,6 +75,7 @@ export const ANNOTATION_TABLE_CONFIG = {
       'event_time_source',
       'title',
       'entry_text',
+      'media_json',
       'color',
       'created_at',
       'updated_at',
@@ -92,6 +95,10 @@ function validateAnnotationPayload(
 ): void {
   if (kind === 'taggedIncident' || kind === 'lapNote') {
     ensurePositiveInteger(payload.lap_number, 'Lap');
+  }
+
+  if (kind === 'taggedIncident' || kind === 'journalEntry') {
+    payload.media_json = normalizeMediaJson(payload.media_json);
   }
 
   if (kind === 'rangeEvent' || kind === 'driverStint') {
@@ -178,6 +185,9 @@ export function createAnnotationStore(db: SQLiteClient): AnnotationStore {
                 payload.event_time_source ||
                 (payload.event_time_iso ? 'manual' : 'lap'),
             }
+          : {}),
+        ...(kind === 'taggedIncident' || kind === 'journalEntry'
+          ? { media_json: normalizeMediaJson(payload.media_json) }
           : {}),
         created_at: existing?.created_at || now,
         updated_at: now,

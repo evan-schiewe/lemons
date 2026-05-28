@@ -17,3 +17,28 @@ output "race_artifacts_bucket_name" {
   description = "R2 bucket storing per-race SQLite artifacts."
   value       = cloudflare_r2_bucket.race_artifacts.name
 }
+
+output "media_zone_id" {
+  description = "Cloudflare zone ID for the public media domain."
+  value       = cloudflare_zone.media.id
+}
+
+output "media_zone_name_servers" {
+  description = "Cloudflare-assigned nameservers to configure at the domain registrar."
+  value       = cloudflare_zone.media.name_servers
+}
+
+output "media_bucket_name" {
+  description = "R2 bucket storing public pregenerated race photo variants."
+  value       = cloudflare_r2_bucket.media_photos.name
+}
+
+output "media_public_base_url" {
+  description = "Public base URL for media objects."
+  value       = local.media_base_url
+}
+
+output "media_custom_domain_status" {
+  description = "R2 custom domain ownership and SSL status, or null when custom domain attachment is disabled."
+  value       = try(cloudflare_r2_custom_domain.media_photos[0].status, null)
+}

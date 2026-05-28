@@ -37,9 +37,14 @@ run = "pnpm check"
 description = "Build the static app"
 run = "pnpm build"
 
+[tasks.worker-build]
+description = "Bundle the Cloudflare Worker for Terraform deployment"
+dir = "cloudflare/worker"
+run = "wrangler deploy --dry-run --outdir dist"
+
 [tasks.ci]
 description = "Run the local pre-ship checks"
-depends = ["check", "build", "infra-fmt-check"]
+depends = ["check", "build", "worker-build", "infra-fmt-check"]
 
 [tasks.hooks-install]
 description = "Install prek Git hooks"
@@ -56,11 +61,13 @@ run = "tofu init"
 
 [tasks.infra-plan]
 description = "Plan Cloudflare infrastructure changes"
+depends = ["worker-build"]
 dir = "infra/cloudflare"
 run = "tofu plan"
 
 [tasks.infra-apply]
 description = "Apply Cloudflare infrastructure changes"
+depends = ["worker-build"]
 dir = "infra/cloudflare"
 run = "tofu apply"
 
@@ -74,6 +81,7 @@ run = "tofu fmt -check -recursive infra"
 
 [tasks.infra-validate]
 description = "Validate Cloudflare OpenTofu configuration"
+depends = ["worker-build"]
 dir = "infra/cloudflare"
 run = "tofu validate"
 
@@ -89,6 +97,7 @@ run = [
   "wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0001_sync_schema.sql",
   "wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0002_race_artifacts.sql",
   "wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0003_race_upload_limits.sql",
+  "wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0004_media_uploads.sql",
 ]
 
 [tasks.sync-edit-link]
@@ -98,7 +107,7 @@ arg "<sub>" help="Token subject"
 flag "--app-url <url>" help="App URL for generated edit link" env="APP_URL"
 flag "--days <days>" help="Token lifetime in days" default="28"
 flag "--workspace <workspace>" help="Workspace id" default="main"
-flag "--scope <scope>" help="Comma-separated token scopes" default="annotations:read,annotations:write,races:read,races:write"
+flag "--scope <scope>" help="Comma-separated token scopes" default="annotations:read,annotations:write,races:read,races:write,media:write"
 flag "--races <races>" help="Comma-separated race allowlist" default="*"
 flag "--jti <jti>" help="Token id"
 '''

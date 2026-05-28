@@ -2,8 +2,10 @@ import type {
   AnnotationKind,
   AnnotationPayload,
   CloudRaceMetadata,
+  MediaAttachment,
   SyncSession,
 } from '../../types';
+import type { PreparedMediaUpload } from '../media/mediaUpload';
 
 export const SYNC_PUSH_BATCH_SIZE = 50;
 
@@ -67,6 +69,10 @@ export interface CloudRacePushResponse {
     artifactSha256: string;
     artifactSizeBytes: number;
   };
+}
+
+export interface MediaUploadResponse {
+  asset: Omit<MediaAttachment, 'caption' | 'altText'>;
 }
 
 export class SyncApiError extends Error {
@@ -194,6 +200,44 @@ export class SyncApiClient {
     return (await response.json()) as CloudRacePushResponse;
   }
 
+  async uploadMedia(
+    clientId: string,
+    clientRequestId: string,
+    raceKey: string,
+    upload: PreparedMediaUpload,
+  ): Promise<MediaUploadResponse> {
+    const metadata = {
+      clientId,
+      clientRequestId,
+      raceKey,
+      assetId: upload.assetId,
+      originalFileName: upload.originalFileName,
+      sourceSha256: upload.sourceSha256,
+      variants: Object.fromEntries(
+        upload.variants.map((variant) => [
+          variant.name,
+          {
+            width: variant.width,
+            height: variant.height,
+          },
+        ]),
+      ),
+    };
+    const body = new FormData();
+    body.set('metadata', JSON.stringify(metadata));
+    upload.variants.forEach((variant) => {
+      body.set(variant.name, variant.file, variant.file.name);
+    });
+
+    const response = await this.request('/v1/media/upload', {
+      method: 'POST',
+      body,
+      authRequired: true,
+    });
+
+    return (await response.json()) as MediaUploadResponse;
+  }
+
   private async post<T>(
     path: string,
     body: unknown,
@@ -216,7 +260,11 @@ export class SyncApiClient {
     options: RequestInit & { authRequired?: boolean },
   ): Promise<Response> {
     const headers = new Headers(options.headers);
-    if (!headers.has('Content-Type') && options.body != null) {
+    if (
+      !headers.has('Content-Type') &&
+      options.body != null &&
+      !(options.body instanceof FormData)
+    ) {
       headers.set('Content-Type', 'application/json');
     }
 

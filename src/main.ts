@@ -230,6 +230,37 @@ function createAnnotationHandlers({
         setStatus(`Unable to remove annotation: ${errorMessage(error)}`);
       }
     },
+    onUploadMedia: async (files: File[]) => {
+      if (!state.activeRaceId) {
+        throw new Error('Import a race before uploading images.');
+      }
+
+      if (!syncController?.canUploadMedia()) {
+        throw new Error(
+          'Cloud media uploads require a connected edit link with media upload access.',
+        );
+      }
+
+      try {
+        setStatus(
+          `Preparing ${files.length} image${files.length === 1 ? '' : 's'}...`,
+        );
+        const attachments = await syncController.uploadMediaFiles(
+          state.activeRaceId,
+          files,
+        );
+        setStatus(
+          `Uploaded ${attachments.length} image${attachments.length === 1 ? '' : 's'}. Save the annotation to attach them.`,
+        );
+        return attachments;
+      } catch (error) {
+        console.error(error);
+        setStatus(`Unable to upload image: ${errorMessage(error)}`);
+        throw error;
+      }
+    },
+    isMediaUploadEnabled: () =>
+      Boolean(state.activeRaceId && syncController?.canUploadMedia()),
   };
 }
 

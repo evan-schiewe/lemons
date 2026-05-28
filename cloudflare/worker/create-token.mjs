@@ -18,7 +18,8 @@ const payload = {
   sub: args.sub,
   workspace_id: args.workspace || 'main',
   scope: splitArg(
-    args.scope || 'annotations:read,annotations:write,races:read,races:write',
+    args.scope ||
+      'annotations:read,annotations:write,races:read,races:write,media:write',
   ),
   races: splitArg(args.races || '*'),
   iat: now,

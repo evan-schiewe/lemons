@@ -194,6 +194,28 @@ export type PanelAnnotationKind =
   | 'rangeEvent'
   | 'driverStint';
 
+export type MediaVariantName = 'thumb' | 'medium' | 'large';
+
+export interface MediaVariant {
+  name: MediaVariantName | string;
+  objectKey: string;
+  width: number;
+  height: number;
+  byteSize: number;
+  contentType: string;
+}
+
+export interface MediaAttachment {
+  assetId: string;
+  originalFileName: string;
+  sourceSha256: string;
+  createdBy: string;
+  createdAt: string;
+  caption: string;
+  altText: string;
+  variants: MediaVariant[];
+}
+
 export interface LapNote extends DbRow, SyncMetadata {
   id: string;
   race_id: string;
@@ -213,6 +235,7 @@ export interface TaggedIncident extends DbRow, SyncMetadata {
   tag: string;
   color: string;
   details: string | null;
+  media_json: string;
   created_at: string;
   updated_at: string;
 }
@@ -250,6 +273,7 @@ export interface JournalEntry extends DbRow, SyncMetadata {
   event_time_source: string;
   title: string | null;
   entry_text: string;
+  media_json: string;
   color: string;
   created_at: string;
   updated_at: string;
@@ -366,6 +390,7 @@ export interface TimelineEvent extends DbRow {
   new_driver_name: string | null;
   title: string;
   body: string;
+  media_json: string | null;
   color: string;
   event_time_iso: string | null;
   event_time_source: string;
@@ -387,6 +412,8 @@ export interface AnnotationHandlers {
     payload: AnnotationPayload,
   ) => Promise<boolean>;
   onDelete: (kind: AnnotationKind, id: string) => Promise<void>;
+  onUploadMedia?: (files: File[]) => Promise<MediaAttachment[]>;
+  isMediaUploadEnabled?: () => boolean;
 }
 
 export interface AnnotationStore {

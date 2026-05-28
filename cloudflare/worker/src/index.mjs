@@ -1,3 +1,5 @@
+import { Hono } from 'hono';
+
 const MAX_PUSH_MUTATIONS = 50;
 const MAX_PULL_LIMIT = 500;
 const DEFAULT_WORKSPACE_ID = 'main';
@@ -7,8 +9,22 @@ const DEFAULT_RACE_WORKSPACE_STORAGE_QUOTA_BYTES = 1073741824;
 const DEFAULT_RACE_UPLOADS_PER_TOKEN_PER_DAY = 20;
 const DEFAULT_RACE_UPLOADS_PER_WORKSPACE_PER_DAY = 100;
 const DEFAULT_RACE_ARTIFACT_RETAINED_VERSIONS = 2;
+const DEFAULT_MEDIA_UPLOAD_MAX_BYTES = 10485760;
+const DEFAULT_MEDIA_VARIANT_MAX_BYTES = 3145728;
+const DEFAULT_MEDIA_UPLOADS_PER_TOKEN_PER_DAY = 100;
+const DEFAULT_MEDIA_UPLOADS_PER_WORKSPACE_PER_DAY = 500;
+const DEFAULT_MEDIA_WORKSPACE_STORAGE_QUOTA_BYTES = 1073741824;
 const RACE_KEY_PATTERN = /^race-[a-f0-9]{64}$/;
 const CONTENT_HASH_PATTERN = /^[a-f0-9]{64}$/;
+const ASSET_ID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const MEDIA_VARIANT_NAMES = ['thumb', 'medium', 'large'];
+const MEDIA_CONTENT_TYPES = new Map([
+  ['image/webp', 'webp'],
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+]);
 const SQLITE_HEADER_BYTES = [
   0x53, 0x51, 0x4c, 0x69, 0x74, 0x65, 0x20, 0x66, 0x6f, 0x72, 0x6d, 0x61, 0x74,
   0x20, 0x33, 0x00,
@@ -83,69 +99,56 @@ const KIND_CONFIG = {
   },
 };
 
-export default {
-  async fetch(request, env) {
-    const cors = corsHeaders(request, env);
+const app = new Hono();
 
-    if (request.method === 'OPTIONS') {
-      return new Response(null, {
-        status: cors['Access-Control-Allow-Origin'] ? 204 : 403,
-        headers: cors,
-      });
-    }
+app.on('OPTIONS', '*', (c) => {
+  const cors = corsHeaders(c.req.raw, c.env);
+  return new Response(null, {
+    status: cors['Access-Control-Allow-Origin'] ? 204 : 403,
+    headers: cors,
+  });
+});
 
-    try {
-      const url = new URL(request.url);
+app.get('/', handleHealth);
+app.get('/v1/health', handleHealth);
+app.post('/v1/session/resolve', route(handleResolveSession));
+app.post('/v1/sync/pull', route(handlePull));
+app.post('/v1/sync/push', route(handlePush));
+app.post('/v1/races/list', route(handleRaceList));
+app.post('/v1/races/download', route(handleRaceDownload));
+app.post('/v1/races/push', route(handleRacePush));
+app.post('/v1/media/upload', route(handleMediaUpload));
 
-      if (
-        request.method === 'GET' &&
-        (url.pathname === '/' || url.pathname === '/v1/health')
-      ) {
-        return json(
-          {
-            ok: true,
-            service: 'lemons-sync-api',
-          },
-          200,
-          cors,
-        );
-      }
+app.notFound((c) =>
+  json({ error: 'Not found.' }, 404, corsHeaders(c.req.raw, c.env)),
+);
 
-      if (request.method === 'POST' && url.pathname === '/v1/session/resolve') {
-        return handleResolveSession(request, env, cors);
-      }
+app.onError((error, c) => {
+  const cors = corsHeaders(c.req.raw, c.env);
+  if (error instanceof HttpError) {
+    return json({ error: error.message }, error.status, cors);
+  }
 
-      if (request.method === 'POST' && url.pathname === '/v1/sync/pull') {
-        return handlePull(request, env, cors);
-      }
+  console.error(error);
+  return json({ error: 'Internal sync API error.' }, 500, cors);
+});
 
-      if (request.method === 'POST' && url.pathname === '/v1/sync/push') {
-        return handlePush(request, env, cors);
-      }
+export default app;
 
-      if (request.method === 'POST' && url.pathname === '/v1/races/list') {
-        return handleRaceList(request, env, cors);
-      }
+function route(handler) {
+  return (c) => handler(c.req.raw, c.env, corsHeaders(c.req.raw, c.env));
+}
 
-      if (request.method === 'POST' && url.pathname === '/v1/races/download') {
-        return handleRaceDownload(request, env, cors);
-      }
-
-      if (request.method === 'POST' && url.pathname === '/v1/races/push') {
-        return handleRacePush(request, env, cors);
-      }
-
-      return json({ error: 'Not found.' }, 404, cors);
-    } catch (error) {
-      if (error instanceof HttpError) {
-        return json({ error: error.message }, error.status, cors);
-      }
-
-      console.error(error);
-      return json({ error: 'Internal sync API error.' }, 500, cors);
-    }
-  },
-};
+function handleHealth(c) {
+  return json(
+    {
+      ok: true,
+      service: 'lemons-sync-api',
+    },
+    200,
+    corsHeaders(c.req.raw, c.env),
+  );
+}
 
 async function handleResolveSession(request, env, cors) {
   const body = await readJson(request);
@@ -512,6 +515,158 @@ async function handleRacePush(request, env, cors) {
   );
 }
 
+async function handleMediaUpload(request, env, cors) {
+  const claims = await authenticate(request, env, 'media:write');
+  const workspaceId = workspaceFromClaims(claims);
+  const tokenJti = stringValue(claims.jti);
+  if (!tokenJti) {
+    throw new HttpError(403, 'Media write tokens must include a jti claim.');
+  }
+  if (!env.MEDIA_PHOTOS) {
+    throw new HttpError(500, 'MEDIA_PHOTOS is not configured.');
+  }
+
+  const contentLength = numberValueHeader(
+    request.headers.get('content-length'),
+  );
+  if (contentLength > mediaUploadMaxBytes(env)) {
+    throw new HttpError(413, 'Media upload is too large.');
+  }
+
+  let formData;
+  try {
+    formData = await request.formData();
+  } catch {
+    throw new HttpError(400, 'Media upload must be multipart form data.');
+  }
+
+  const metadata = parseMediaUploadMetadata(formData.get('metadata'));
+  validateMediaUploadMetadata(metadata, claims);
+
+  const existing = await env.DB.prepare(
+    `
+      SELECT *
+      FROM media_assets
+      WHERE workspace_id = ? AND client_request_id = ?
+      LIMIT 1
+    `,
+  )
+    .bind(workspaceId, metadata.clientRequestId)
+    .first();
+  if (existing) {
+    if (
+      existing.asset_id !== metadata.assetId ||
+      existing.race_key !== metadata.raceKey ||
+      existing.source_sha256 !== metadata.sourceSha256
+    ) {
+      throw new HttpError(
+        409,
+        'clientRequestId was already used for a different media upload.',
+      );
+    }
+
+    return json({ asset: mediaAssetRowToResponse(existing) }, 200, cors);
+  }
+
+  const variants = [];
+  let totalSizeBytes = 0;
+  for (const variantName of MEDIA_VARIANT_NAMES) {
+    const file = formData.get(variantName);
+    const variant = metadata.variants[variantName] || {};
+    const mediaFile = await readMediaVariantFile(
+      file,
+      variantName,
+      mediaVariantMaxBytes(env),
+    );
+    const extension = MEDIA_CONTENT_TYPES.get(mediaFile.contentType);
+    const objectKey = `photos/${workspaceId}/${metadata.raceKey}/${metadata.assetId}/${variantName}.${extension}`;
+    totalSizeBytes += mediaFile.bytes.byteLength;
+
+    variants.push({
+      name: variantName,
+      objectKey,
+      width: positiveInteger(variant.width),
+      height: positiveInteger(variant.height),
+      byteSize: mediaFile.bytes.byteLength,
+      contentType: mediaFile.contentType,
+      bytes: mediaFile.bytes,
+    });
+  }
+
+  if (totalSizeBytes > mediaUploadMaxBytes(env)) {
+    throw new HttpError(413, 'Media upload is too large.');
+  }
+
+  const projectedStorageBytes =
+    (await currentWorkspaceMediaStorageBytes(env, workspaceId)) +
+    totalSizeBytes;
+  if (projectedStorageBytes > mediaWorkspaceStorageQuotaBytes(env)) {
+    throw new HttpError(413, 'Media workspace storage quota exceeded.');
+  }
+
+  await reserveMediaUploadSlots(env, workspaceId, tokenJti);
+
+  const now = new Date().toISOString();
+  const responseVariants = variants.map(
+    ({ bytes: _bytes, ...variant }) => variant,
+  );
+  const wroteKeys = [];
+
+  try {
+    for (const variant of variants) {
+      await env.MEDIA_PHOTOS.put(variant.objectKey, variant.bytes, {
+        httpMetadata: {
+          contentType: variant.contentType,
+          cacheControl: 'public, max-age=31536000, immutable',
+        },
+      });
+      wroteKeys.push(variant.objectKey);
+    }
+
+    await env.DB.prepare(
+      `
+        INSERT INTO media_assets (
+          workspace_id, asset_id, client_request_id, race_key,
+          original_file_name, source_sha256, variants_json,
+          total_size_bytes, created_by, created_at, deleted_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      `,
+    )
+      .bind(
+        workspaceId,
+        metadata.assetId,
+        metadata.clientRequestId,
+        metadata.raceKey,
+        metadata.originalFileName,
+        metadata.sourceSha256,
+        JSON.stringify(responseVariants),
+        totalSizeBytes,
+        claims.sub,
+        now,
+      )
+      .run();
+  } catch (error) {
+    await Promise.all(wroteKeys.map((key) => deleteMediaObject(env, key)));
+    throw error;
+  }
+
+  return json(
+    {
+      asset: {
+        assetId: metadata.assetId,
+        raceKey: metadata.raceKey,
+        originalFileName: metadata.originalFileName,
+        sourceSha256: metadata.sourceSha256,
+        createdBy: claims.sub,
+        createdAt: now,
+        variants: responseVariants,
+      },
+    },
+    200,
+    cors,
+  );
+}
+
 async function handlePull(request, env, cors) {
   const claims = await authenticate(request, env, 'annotations:read');
   const workspaceId = workspaceFromClaims(claims);
@@ -544,7 +699,9 @@ async function handlePull(request, env, cors) {
         .all();
 
       for (const row of rows.results || []) {
-        mutations.push(rowToPulledMutation(kind, config, row));
+        const mutation = rowToPulledMutation(kind, config, row);
+        await attachMediaJsonToPulledMutation(env, workspaceId, mutation);
+        mutations.push(mutation);
       }
     }
   }
@@ -583,7 +740,7 @@ async function handlePush(request, env, cors) {
   const newMutations = [];
 
   for (const mutation of mutations) {
-    validateMutationShape(mutation, claims);
+    validateMutationShape(mutation, claims, workspaceId);
     const existing = await env.DB.prepare(
       `
         SELECT client_request_id, server_sequence
@@ -623,6 +780,15 @@ async function handlePush(request, env, cors) {
           acceptedAt,
         ),
       );
+      const mediaStatement = buildAnnotationMediaStatement(
+        env,
+        workspaceId,
+        mutation,
+        acceptedAt,
+      );
+      if (mediaStatement) {
+        statements.push(mediaStatement);
+      }
       statements.push(
         env.DB.prepare(
           `
@@ -749,6 +915,68 @@ function buildAnnotationStatement(env, workspaceId, subject, mutation, now) {
   );
 }
 
+function buildAnnotationMediaStatement(env, workspaceId, mutation, now) {
+  if (!annotationSupportsMedia(mutation.kind)) {
+    return null;
+  }
+
+  if (mutation.action === 'delete') {
+    return env.DB.prepare(
+      `
+        DELETE FROM annotation_media
+        WHERE workspace_id = ? AND kind = ? AND annotation_id = ?
+      `,
+    ).bind(workspaceId, mutation.kind, mutation.annotationId);
+  }
+
+  const mediaJson = validateMediaJsonPayload(
+    mutation.kind,
+    mutation.payload?.media_json,
+    {
+      workspaceId,
+      raceKey: mutation.raceKey,
+    },
+  );
+
+  return env.DB.prepare(
+    `
+      INSERT INTO annotation_media (
+        workspace_id, race_key, kind, annotation_id, media_json, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(workspace_id, kind, annotation_id) DO UPDATE SET
+        race_key = excluded.race_key,
+        media_json = excluded.media_json,
+        updated_at = excluded.updated_at
+    `,
+  ).bind(
+    workspaceId,
+    mutation.raceKey,
+    mutation.kind,
+    mutation.annotationId,
+    mediaJson,
+    now,
+  );
+}
+
+async function attachMediaJsonToPulledMutation(env, workspaceId, mutation) {
+  if (mutation.action === 'delete' || !annotationSupportsMedia(mutation.kind)) {
+    return;
+  }
+
+  const row = await env.DB.prepare(
+    `
+      SELECT media_json
+      FROM annotation_media
+      WHERE workspace_id = ? AND kind = ? AND annotation_id = ?
+      LIMIT 1
+    `,
+  )
+    .bind(workspaceId, mutation.kind, mutation.annotationId)
+    .first();
+
+  mutation.payload.media_json = row?.media_json || '[]';
+}
+
 function rowToPulledMutation(kind, config, row) {
   const isDeleted = Boolean(row.deleted_at);
   const payload = { id: row.annotation_id };
@@ -771,7 +999,7 @@ function rowToPulledMutation(kind, config, row) {
   };
 }
 
-function validateMutationShape(mutation, claims) {
+function validateMutationShape(mutation, claims, workspaceId) {
   const config = KIND_CONFIG[mutation.kind];
   if (!config) {
     throw new HttpError(400, 'Invalid mutation kind.');
@@ -833,6 +1061,289 @@ function validateMutationShape(mutation, claims) {
     if (!hasLap && !hasTime) {
       throw new HttpError(400, 'Journal entries require a lap or timestamp.');
     }
+  }
+
+  if (annotationSupportsMedia(mutation.kind)) {
+    validateMediaJsonPayload(mutation.kind, payload.media_json, {
+      workspaceId,
+      raceKey: mutation.raceKey,
+    });
+  } else if (payload.media_json != null && payload.media_json !== '') {
+    throw new HttpError(
+      400,
+      'Media attachments are not allowed for this kind.',
+    );
+  }
+}
+
+function annotationSupportsMedia(kind) {
+  return kind === 'taggedIncident' || kind === 'journalEntry';
+}
+
+function validateMediaJsonPayload(kind, value, context = null) {
+  if (!annotationSupportsMedia(kind)) {
+    return '[]';
+  }
+
+  if (value == null || value === '') {
+    return '[]';
+  }
+
+  if (typeof value !== 'string') {
+    throw new HttpError(400, 'media_json must be a JSON string.');
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new HttpError(400, 'media_json must be valid JSON.');
+  }
+
+  if (!Array.isArray(parsed)) {
+    throw new HttpError(400, 'media_json must be an array.');
+  }
+  if (parsed.length > 4) {
+    throw new HttpError(400, 'A record can include at most 4 images.');
+  }
+
+  const normalized = parsed.map((item) =>
+    validateMediaAttachmentShape(item, context),
+  );
+  return JSON.stringify(normalized);
+}
+
+function validateMediaAttachmentShape(item, context) {
+  if (!item || typeof item !== 'object') {
+    throw new HttpError(400, 'Invalid media attachment.');
+  }
+
+  const assetId = stringValue(item.assetId);
+  if (!ASSET_ID_PATTERN.test(assetId)) {
+    throw new HttpError(400, 'Invalid media asset id.');
+  }
+
+  const variants = Array.isArray(item.variants) ? item.variants : [];
+  if (!variants.length) {
+    throw new HttpError(400, 'Media attachment is missing variants.');
+  }
+
+  const expectedPrefix =
+    context?.workspaceId && context?.raceKey
+      ? `photos/${context.workspaceId}/${context.raceKey}/${assetId}/`
+      : '';
+
+  return {
+    assetId,
+    originalFileName: stringValue(item.originalFileName).slice(0, 240),
+    sourceSha256: stringValue(item.sourceSha256),
+    createdBy: stringValue(item.createdBy),
+    createdAt: stringValue(item.createdAt),
+    caption: stringValue(item.caption).slice(0, 240),
+    altText: stringValue(item.altText).slice(0, 240),
+    variants: variants.map((variant) =>
+      validateMediaVariantShape(variant, expectedPrefix),
+    ),
+  };
+}
+
+function validateMediaVariantShape(variant, expectedPrefix) {
+  const name = stringValue(variant?.name);
+  const objectKey = stringValue(variant?.objectKey).replace(/^\/+/, '');
+  const contentType = normalizeMediaContentType(variant?.contentType);
+  const extension = MEDIA_CONTENT_TYPES.get(contentType);
+
+  if (!MEDIA_VARIANT_NAMES.includes(name)) {
+    throw new HttpError(400, 'Invalid media variant name.');
+  }
+  if (!extension) {
+    throw new HttpError(400, 'Invalid media variant content type.');
+  }
+  if (expectedPrefix && objectKey !== `${expectedPrefix}${name}.${extension}`) {
+    throw new HttpError(400, 'Invalid media variant object key.');
+  }
+
+  return {
+    name,
+    objectKey,
+    width: positiveInteger(variant?.width),
+    height: positiveInteger(variant?.height),
+    byteSize: positiveInteger(variant?.byteSize),
+    contentType,
+  };
+}
+
+function parseMediaUploadMetadata(value) {
+  if (typeof value !== 'string') {
+    throw new HttpError(400, 'Missing media metadata.');
+  }
+
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new HttpError(400, 'Media metadata must be JSON.');
+  }
+}
+
+function validateMediaUploadMetadata(metadata, claims) {
+  const clientId = stringValue(metadata.clientId);
+  const clientRequestId = stringValue(metadata.clientRequestId);
+  const raceKey = stringValue(metadata.raceKey);
+  const assetId = stringValue(metadata.assetId);
+  const originalFileName = stringValue(metadata.originalFileName);
+  const sourceSha256 = stringValue(metadata.sourceSha256);
+
+  if (!clientId || !clientRequestId) {
+    throw new HttpError(400, 'Missing media upload client ids.');
+  }
+  if (clientId.length > 128 || clientRequestId.length > 128) {
+    throw new HttpError(400, 'Media upload client ids are too long.');
+  }
+  if (!raceKey || !raceAllowed(claims, raceKey)) {
+    throw new HttpError(
+      403,
+      'Token is not allowed to upload media for this race.',
+    );
+  }
+  if (!ASSET_ID_PATTERN.test(assetId)) {
+    throw new HttpError(400, 'Invalid media asset id.');
+  }
+  if (!originalFileName || originalFileName.length > 240) {
+    throw new HttpError(400, 'Invalid original file name.');
+  }
+  if (!SHA256_PATTERN.test(sourceSha256)) {
+    throw new HttpError(400, 'Invalid source image hash.');
+  }
+
+  metadata.clientId = clientId;
+  metadata.clientRequestId = clientRequestId;
+  metadata.raceKey = raceKey;
+  metadata.assetId = assetId;
+  metadata.originalFileName = originalFileName;
+  metadata.sourceSha256 = sourceSha256;
+  metadata.variants =
+    metadata.variants && typeof metadata.variants === 'object'
+      ? metadata.variants
+      : {};
+}
+
+async function readMediaVariantFile(value, variantName, maxBytes) {
+  if (!value || typeof value.arrayBuffer !== 'function') {
+    throw new HttpError(400, `Missing ${variantName} media variant.`);
+  }
+
+  const contentType = normalizeMediaContentType(value.type);
+  if (!MEDIA_CONTENT_TYPES.has(contentType)) {
+    throw new HttpError(400, `Unsupported ${variantName} media content type.`);
+  }
+
+  if (Number(value.size || 0) > maxBytes) {
+    throw new HttpError(413, `${variantName} media variant is too large.`);
+  }
+
+  const bytes = await value.arrayBuffer();
+  if (!bytes.byteLength) {
+    throw new HttpError(400, `${variantName} media variant is empty.`);
+  }
+  if (bytes.byteLength > maxBytes) {
+    throw new HttpError(413, `${variantName} media variant is too large.`);
+  }
+
+  return { bytes, contentType };
+}
+
+function normalizeMediaContentType(value) {
+  const contentType = stringValue(value).toLowerCase();
+  return contentType === 'image/jpg' ? 'image/jpeg' : contentType;
+}
+
+async function currentWorkspaceMediaStorageBytes(env, workspaceId) {
+  const row = await env.DB.prepare(
+    `
+      SELECT COALESCE(SUM(total_size_bytes), 0) AS total
+      FROM media_assets
+      WHERE workspace_id = ? AND deleted_at IS NULL
+    `,
+  )
+    .bind(workspaceId)
+    .first();
+  return Number(row?.total || 0);
+}
+
+async function reserveMediaUploadSlots(env, workspaceId, tokenJti) {
+  const windowStart = `${new Date().toISOString().slice(0, 10)}T00:00:00Z`;
+  const now = new Date().toISOString();
+
+  await reserveMediaUploadCounter(
+    env,
+    workspaceId,
+    'token',
+    tokenJti,
+    windowStart,
+    mediaUploadsPerTokenPerDay(env),
+    now,
+    'Token media upload limit exceeded.',
+  );
+  await reserveMediaUploadCounter(
+    env,
+    workspaceId,
+    'workspace',
+    workspaceId,
+    windowStart,
+    mediaUploadsPerWorkspacePerDay(env),
+    now,
+    'Workspace media upload limit exceeded.',
+  );
+}
+
+async function reserveMediaUploadCounter(
+  env,
+  workspaceId,
+  bucketType,
+  bucketKey,
+  windowStart,
+  limit,
+  now,
+  message,
+) {
+  const row = await env.DB.prepare(
+    `
+      INSERT INTO media_upload_counters (
+        workspace_id, bucket_type, bucket_key, window_start, count, updated_at
+      ) VALUES (?, ?, ?, ?, 1, ?)
+      ON CONFLICT(workspace_id, bucket_type, bucket_key, window_start)
+      DO UPDATE SET
+        count = count + 1,
+        updated_at = excluded.updated_at
+      WHERE count < ?
+      RETURNING count
+    `,
+  )
+    .bind(workspaceId, bucketType, bucketKey, windowStart, now, limit)
+    .first();
+
+  if (!row) {
+    throw new HttpError(429, message);
+  }
+}
+
+function mediaAssetRowToResponse(row) {
+  return {
+    assetId: row.asset_id,
+    raceKey: row.race_key,
+    originalFileName: row.original_file_name,
+    sourceSha256: row.source_sha256,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+    variants: parseJsonArray(row.variants_json),
+  };
+}
+
+async function deleteMediaObject(env, key) {
+  try {
+    await env.MEDIA_PHOTOS.delete(key);
+  } catch (error) {
+    console.error('Failed to delete media object during cleanup.', error);
   }
 }
 
@@ -1368,9 +1879,61 @@ function raceArtifactRetainedVersions(env) {
   );
 }
 
+function mediaUploadMaxBytes(env) {
+  return positiveIntegerEnv(
+    env.MEDIA_UPLOAD_MAX_BYTES,
+    DEFAULT_MEDIA_UPLOAD_MAX_BYTES,
+  );
+}
+
+function mediaVariantMaxBytes(env) {
+  return positiveIntegerEnv(
+    env.MEDIA_VARIANT_MAX_BYTES,
+    DEFAULT_MEDIA_VARIANT_MAX_BYTES,
+  );
+}
+
+function mediaUploadsPerTokenPerDay(env) {
+  return positiveIntegerEnv(
+    env.MEDIA_UPLOADS_PER_TOKEN_PER_DAY,
+    DEFAULT_MEDIA_UPLOADS_PER_TOKEN_PER_DAY,
+  );
+}
+
+function mediaUploadsPerWorkspacePerDay(env) {
+  return positiveIntegerEnv(
+    env.MEDIA_UPLOADS_PER_WORKSPACE_PER_DAY,
+    DEFAULT_MEDIA_UPLOADS_PER_WORKSPACE_PER_DAY,
+  );
+}
+
+function mediaWorkspaceStorageQuotaBytes(env) {
+  return positiveIntegerEnv(
+    env.MEDIA_WORKSPACE_STORAGE_QUOTA_BYTES,
+    DEFAULT_MEDIA_WORKSPACE_STORAGE_QUOTA_BYTES,
+  );
+}
+
 function positiveIntegerEnv(value, fallback) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.trunc(parsed) : fallback;
+}
+
+function positiveInteger(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    throw new HttpError(400, 'Media dimensions must be positive integers.');
+  }
+  return Math.trunc(parsed);
+}
+
+function parseJsonArray(value) {
+  try {
+    const parsed = JSON.parse(`${value || '[]'}`);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 }
 
 async function sha256Hex(bytes) {

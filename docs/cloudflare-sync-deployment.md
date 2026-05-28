@@ -9,11 +9,13 @@ Cloud sync stores race metadata in D1, per-race SQLite artifacts in R2, and anno
 
 ## Prerequisites
 
-- Node 22.13+ or Node 24 with pnpm 11.3.
+- Node 26 with pnpm 11.3.
 - Terraform or OpenTofu.
 - Cloudflare account with Workers, D1, and R2 enabled.
 - Wrangler authenticated for the target Cloudflare account.
 - GitHub token only if Terraform/OpenTofu should set repository Actions variables.
+- A purchased media domain if you want the public R2 photo CDN. Domain
+  registration and registrar nameserver delegation are still manual.
 
 Install local dependencies first:
 
@@ -34,9 +36,23 @@ token_signing_secret         = "use-a-long-random-secret"
 race_artifacts_bucket_name   = "lemons-race-artifacts"
 auto_download_max_bytes      = 104857600
 race_artifact_max_bytes      = 26214400
+media_root_domain            = "example.com"
+enable_media_custom_domain   = false # first apply only; set true after nameserver delegation
 
 allowed_origins = [
   "https://<github-owner>.github.io"
+]
+
+media_allowed_origins = [
+  "https://<github-owner>.github.io",
+  "http://localhost:5173",
+  "http://127.0.0.1:5173"
+]
+
+media_allowed_referer_prefixes = [
+  "https://<github-owner>.github.io/lemons/",
+  "http://localhost:5173/lemons/",
+  "http://127.0.0.1:5173/lemons/"
 ]
 
 github_owner      = "<github-owner>"
@@ -58,6 +74,7 @@ Then apply:
 
 ```bash
 mise run infra-r2-backend-bootstrap
+mise run worker-build
 cd infra/cloudflare
 tofu init
 tofu apply
@@ -79,26 +96,69 @@ The apply creates:
 
 - Cloudflare D1 database
 - Cloudflare R2 bucket for per-race SQLite artifacts
+- Cloudflare DNS zone for `media_root_domain`
+- Cloudflare R2 bucket for public pregenerated race photo variants
+- R2 custom domain `media.<media_root_domain>`, when `enable_media_custom_domain` is true
+- R2 CORS rules for `media_allowed_origins`
+- Cloudflare cache, response header, and optional hotlink deterrence rules for the media hostname
 - Cloudflare Worker
 - Worker `workers.dev` route, when `enable_workers_dev` is true
 - Worker D1 binding
-- Worker R2 binding
+- Worker R2 bindings
 - Worker `TOKEN_SIGNING_SECRET`
-- Worker CORS, race auto-download, upload limit, and quota variables
+- Worker CORS, race auto-download, race upload, and media upload limit/quota variables
 - R2 lifecycle rule for old versioned race artifacts
 - D1 schema from all files in `infra/cloudflare/d1/migrations/`
 - optional GitHub Actions variable `VITE_SYNC_API_BASE`
+- optional GitHub Actions variable `VITE_MEDIA_BASE_URL`
 
 The D1 schema step runs Wrangler through a local-exec provisioner. Run apply from an environment where Wrangler can authenticate.
+
+## Bootstrap The Media CDN
+
+The media delivery path is separate from cloud sync. The app can continue to be
+hosted on GitHub Pages while photos are served from `https://media.<domain>/`.
+In-app editor uploads still go through the sync Worker so it can check the
+collaborator token, generate immutable object keys, and write metadata to D1.
+
+Initial domain setup:
+
+1. Buy the domain outside Terraform.
+2. Set `media_root_domain = "<domain>"` and
+   `enable_media_custom_domain = false`.
+3. Run `tofu apply`.
+4. Copy the `media_zone_name_servers` output into the domain registrar.
+5. Wait for the Cloudflare zone to become active.
+6. Set `enable_media_custom_domain = true` and run `tofu apply` again.
+
+Photo object policy:
+
+- Store immutable keys only; do not overwrite an existing photo URL.
+- Use pregenerated sizes. The in-app uploader writes keys like
+  `photos/<workspace>/<race-key>/<asset-id>/thumb.webp`,
+  `photos/<workspace>/<race-key>/<asset-id>/medium.webp`, and
+  `photos/<workspace>/<race-key>/<asset-id>/large.webp`.
+- Upload each object with the correct `Content-Type` and
+  `Cache-Control: public, max-age=31536000, immutable`.
+- Leave `enable_media_r2_dev = false` unless you need a temporary test URL.
+  Cloudflare's Terraform provider warns that the managed `r2.dev` domain
+  resource cannot be destroyed by Terraform once created; keeping it managed
+  and disabled avoids accidental public `r2.dev` delivery.
+
+The hotlink deterrence rule is intentionally soft. Empty `Referer` headers are
+allowed, configured GitHub Pages/local app prefixes are allowed, and other
+non-empty referrers are blocked. This avoids a Worker in the image path but is
+not private access control.
 
 ## Configure GitHub Pages Build
 
 The GitHub Pages workflow reads these repository variables:
 
 - `VITE_SYNC_API_BASE`: sync Worker base URL, for example `https://lemons-sync-api.<subdomain>.workers.dev`
+- `VITE_MEDIA_BASE_URL`: public media URL, for example `https://media.example.com`
 - `VITE_SYNC_READ_ONLY`: optional; set to `true` only to force production read-only mode
 
-If Terraform/OpenTofu manages GitHub variables, `VITE_SYNC_API_BASE` is created automatically when `github_repository` and a derivable API URL are set. Otherwise, create it manually in GitHub:
+If Terraform/OpenTofu manages GitHub variables, `VITE_SYNC_API_BASE` is created automatically when `github_repository` and a derivable API URL are set, and `VITE_MEDIA_BASE_URL` is created when `github_repository` is set. Otherwise, create them manually in GitHub:
 
 `Settings -> Secrets and variables -> Actions -> Variables`
 
@@ -118,11 +178,11 @@ Useful options:
 ```bash
 --days 28
 --workspace main
---scope annotations:read,annotations:write,races:read,races:write
+--scope annotations:read,annotations:write,races:read,races:write,media:write
 --races '*'
 ```
 
-The default scope is `annotations:read,annotations:write,races:read,races:write`. Use narrower scopes when a link should only read races or should not upload new race artifacts.
+The default scope is `annotations:read,annotations:write,races:read,races:write,media:write`. Use narrower scopes when a link should only read races, should not upload new race artifacts, or should not upload images.
 
 The task reads the signing secret from `infra/cloudflare/terraform.tfvars` with
 `tofu console`. Override with `TOKEN_SIGNING_SECRET` when needed.
@@ -162,6 +222,7 @@ Writes are local-first:
 - local SQLite is updated immediately
 - OPFS is persisted
 - race imports queue a race artifact upload to R2
+- image uploads write pregenerated variants to the public media R2 bucket
 - annotation and journal edits queue D1 sync mutations
 - race artifacts flush before annotation/journal mutations
 - annotation/journal mutations push to Cloudflare in batches of 50
@@ -184,6 +245,24 @@ Race uploads require `races:write` and a token with a `jti` claim. Defaults are 
 The Worker rejects oversized artifacts with `413`, rate-limit exhaustion with `429`, reused `clientRequestId` values for a different mutation with `409`, and malformed race metadata with `400`.
 
 New accepted race uploads write an immutable `race-versions/<workspace>/<race>/<sequence>.sqlite` object and then update `races/<workspace>/<race>/latest.sqlite`. D1 points at `latest.sqlite` only after that object is written; if the latest update fails, D1 remains pointed at the immutable accepted object. The lifecycle rule is only a safety net; exact "keep 2" retention is enforced by the Worker after successful uploads.
+
+## Media Upload Limits
+
+In-app image uploads require `media:write` and a token with a `jti` claim. The
+browser resizes each selected image into `thumb`, `medium`, and `large`
+variants before upload; originals are not stored by default.
+
+Defaults:
+
+- `media_upload_max_bytes`: `10485760` bytes, or 10 MiB total per upload
+- `media_variant_max_bytes`: `3145728` bytes, or 3 MiB per variant
+- `media_workspace_storage_quota_bytes`: `1073741824` bytes, or 1 GiB retained media storage per workspace
+- `media_uploads_per_token_per_day`: 100 upload attempts per token `jti` per UTC day
+- `media_uploads_per_workspace_per_day`: 500 upload attempts per workspace per UTC day
+
+Terraform/OpenTofu does not manage individual image objects. The Worker writes
+immutable R2 keys and stores attachment metadata in D1; the annotation or
+journal save stores the selected attachment list in the sync mutation.
 
 ## Restore And Reconnect
 
@@ -213,13 +292,16 @@ cd cloudflare/worker
 wrangler dev
 ```
 
-For local Worker testing, create or bind an R2 bucket named `lemons-race-artifacts` and apply all D1 migrations:
+For local Worker testing, create or bind R2 buckets named
+`lemons-race-artifacts` and `lemons-media-photos`, then apply all D1
+migrations:
 
 ```bash
 cd cloudflare/worker
 wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0001_sync_schema.sql
 wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0002_race_artifacts.sql
 wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0003_race_upload_limits.sql
+wrangler d1 execute lemons_annotations --local --file ../../infra/cloudflare/d1/migrations/0004_media_uploads.sql
 ```
 
 The Worker allows these development origins by default:
@@ -256,5 +338,6 @@ Before shipping changes, run:
 ```bash
 pnpm check
 pnpm build
+mise run worker-build
 terraform fmt -check -recursive infra
 ```
