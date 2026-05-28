@@ -11,6 +11,7 @@ import { formatDurationMs, formatLapTimeHHMMSS } from '../../utils/time';
 echarts.use([BarChart, GridComponent, TooltipComponent, CanvasRenderer]);
 
 let isHistogramExpanded = false;
+const histogramResizeObservers = new WeakMap<HTMLElement, ResizeObserver>();
 
 interface SummaryCardOptions {
   greenFlagOnly?: boolean;
@@ -32,6 +33,7 @@ interface HistogramCard {
   label: string;
   value?: string;
   note?: string;
+  className?: string;
   labelActionHtml?: string;
   visualHtml?: string;
   chartData?: {
@@ -92,7 +94,7 @@ export function renderSummaryCards(
   container.innerHTML = cards
     .map(
       (card) => `
-        <article class="summary-card">
+        <article class="summary-card${card.className ? ` ${escapeHtml(card.className)}` : ''}">
           <div class="summary-card-header">
             <span>${escapeHtml(card.label)}</span>
             ${card.labelActionHtml ?? ''}
@@ -186,6 +188,7 @@ function buildLapHistogramCard(
 
   return {
     label: 'Lap Time Histogram',
+    className: 'summary-card-histogram',
     labelActionHtml: `
           <button
             class="summary-card-expand-btn"
@@ -357,6 +360,12 @@ function disposeSummaryCardCharts(container: HTMLElement): void {
     '.summary-card-histogram-chart',
   );
   chartElements.forEach((element) => {
+    const resizeObserver = histogramResizeObservers.get(element as HTMLElement);
+    if (resizeObserver) {
+      resizeObserver.disconnect();
+      histogramResizeObservers.delete(element as HTMLElement);
+    }
+
     const chart = echarts.getInstanceByDom(element as HTMLElement);
     if (chart) {
       chart.dispose();
@@ -386,6 +395,11 @@ function initializeSummaryCardCharts(
 
   const chart = echarts.init(chartElement);
   allowPageWheelScroll(chartElement);
+  const resizeObserver = new ResizeObserver(() => {
+    requestAnimationFrame(() => resizeHistogramChart(chart, chartElement));
+  });
+  resizeObserver.observe(chartElement);
+  histogramResizeObservers.set(chartElement, resizeObserver);
 
   const histogramCard = chartElement.closest('.summary-card');
   applyHistogramExpandedState({
@@ -448,9 +462,23 @@ function applyHistogramExpandedState({
       useLogScale,
     }),
   );
+  resizeHistogramChart(chart, chartElement);
+  requestAnimationFrame(() => resizeHistogramChart(chart, chartElement));
+  setTimeout(() => resizeHistogramChart(chart, chartElement), 220);
+}
+
+function resizeHistogramChart(
+  chart: ReturnType<typeof echarts.init>,
+  chartElement: HTMLElement,
+): void {
+  const width = chartElement.clientWidth;
+  const height = chartElement.clientHeight;
+  if (width > 0 && height > 0) {
+    chart.resize({ width, height });
+    return;
+  }
+
   chart.resize();
-  requestAnimationFrame(() => chart.resize());
-  setTimeout(() => chart.resize(), 220);
 }
 
 function updateHistogramExpandButton(button: Element, expanded: boolean): void {
@@ -492,7 +520,7 @@ function buildHistogramChartOption(
     animation: false,
     grid: compact
       ? { left: 0, right: 0, top: 24, bottom: 0 }
-      : { left: 72, right: 24, top: 36, bottom: 82 },
+      : { left: 0, right: 8, top: 24, bottom: 76 },
     xAxis: {
       type: 'category',
       data: histogramBins.map((_, index) => `${index + 1}`),
@@ -535,29 +563,10 @@ function buildHistogramChartOption(
     yAxis: {
       type: useLogScale ? 'log' : 'value',
       min: useLogScale ? 1 : 0,
-      show: !compact,
-      name: compact
-        ? undefined
-        : useLogScale
-          ? 'Count (laps, log)'
-          : 'Count (laps)',
-      nameLocation: compact ? undefined : 'middle',
-      nameGap: compact ? undefined : 56,
-      nameTextStyle: compact
-        ? undefined
-        : { color: CHART_COLOR_TOKENS.axisText },
-      axisLabel: compact
-        ? undefined
-        : {
-            show: true,
-            color: CHART_COLOR_TOKENS.axisText,
-            formatter: (value: number) => `${formatNumber(value)} laps`,
-            hideOverlap: false,
-          },
-      axisLine: compact
+      show: false,
+      splitLine: compact
         ? undefined
         : { show: true, lineStyle: { color: CHART_COLOR_TOKENS.axisLine } },
-      axisTick: compact ? undefined : { show: true },
     },
     tooltip: {
       trigger: 'axis',
