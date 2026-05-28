@@ -416,6 +416,7 @@ export interface TimelineViewModel {
 
 export interface TimelineViewHandle {
   render: (viewModel: TimelineViewModel | null) => void;
+  setLocalEditingEnabled: (isEnabled: boolean) => void;
 }
 
 export interface AnnotationHelperViewModel {

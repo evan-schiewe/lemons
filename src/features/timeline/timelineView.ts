@@ -56,6 +56,9 @@ export function mountTimelineView(
     }
 
     event.preventDefault();
+    if (!state.isLocalEditingEnabled) {
+      return;
+    }
 
     const formData = new FormData(form);
     const lapNumberValue = `${formData.get('lap_number') ?? ''}`.trim();
@@ -160,6 +163,14 @@ export function mountTimelineView(
         state.editingJournalId = null;
       }
 
+      renderCurrent(container, state);
+    },
+    setLocalEditingEnabled(isEnabled: boolean) {
+      state.isLocalEditingEnabled = isEnabled;
+      if (!isEnabled) {
+        state.editingJournalId = null;
+        state.isComposerExpanded = false;
+      }
       renderCurrent(container, state);
     },
   };

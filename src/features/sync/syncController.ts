@@ -73,7 +73,7 @@ export class SyncController {
   }
 
   async initFromLocation(location: Location = window.location): Promise<void> {
-    if (this.mode === 'read-only' || !this.api || !this.apiBase) {
+    if (!this.api || !this.apiBase) {
       this.emit();
       return;
     }
@@ -88,6 +88,14 @@ export class SyncController {
     storeToken(token);
     removeTokenFromUrl(location);
     await this.resolveToken(token);
+    if (this.mode === 'read-only') {
+      if (sessionHasAnnotationWriteScope(this.session)) {
+        this.mode = 'standalone';
+        this.emit();
+      } else {
+        return;
+      }
+    }
 
     if (
       this.config?.status === 'connected' &&
@@ -524,6 +532,10 @@ function readStoredToken(): string | null {
   } catch {
     return null;
   }
+}
+
+function sessionHasAnnotationWriteScope(session: SyncSession | null): boolean {
+  return Boolean(session?.scopes?.includes('annotations:write'));
 }
 
 function storeToken(token: string): void {

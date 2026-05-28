@@ -10,6 +10,7 @@ import { createEmptyRaceAnnotations, createInitialAppState } from './app/state';
 import {
   setupAnnotationSubtabs,
   setupTabSwitching,
+  syncAnnotationsTabVisibility,
   syncDataTabAndActions,
 } from './app/tabs';
 import { SQLiteClient } from './db/sqliteClient';
@@ -96,7 +97,19 @@ function getSyncMode(): SyncMode {
 }
 
 function isEditingEnabled(): boolean {
+  const snapshot = syncController?.getSnapshot();
+  if (isDeployedGithubPages()) {
+    return Boolean(
+      snapshot?.session?.scopes?.includes('annotations:write') &&
+        snapshot.mode !== 'read-only',
+    );
+  }
+
   return getSyncMode() !== 'read-only';
+}
+
+function isDeployedGithubPages(): boolean {
+  return import.meta.env.PROD && window.location.hostname.endsWith('github.io');
 }
 
 async function ensureChartModules(): Promise<void> {
@@ -150,6 +163,11 @@ function createAnnotationHandlers({
 } = {}): AnnotationHandlers {
   return {
     onSave: async (kind: AnnotationKind, payload: AnnotationPayload) => {
+      if (!isEditingEnabled()) {
+        setStatus('Open a valid collaborative edit link before editing.');
+        return false;
+      }
+
       if (!state.activeRaceId) {
         setStatus('Import a race before saving annotations.');
         return false;
@@ -197,6 +215,11 @@ function createAnnotationHandlers({
       }
     },
     onDelete: async (kind: AnnotationKind, id: string) => {
+      if (!isEditingEnabled()) {
+        setStatus('Open a valid collaborative edit link before editing.');
+        return;
+      }
+
       try {
         await getAnnotationStore().remove(kind, id);
         setStatus('Annotation removed.');
@@ -476,6 +499,7 @@ async function handleSyncConnect(): Promise<void> {
 
 function renderSyncControls(): void {
   const snapshot = syncController?.getSnapshot();
+  syncAnnotationEditingUi();
   if (!snapshot?.apiBase) {
     refs.syncControls.hidden = true;
     return;
@@ -509,6 +533,12 @@ function renderSyncControls(): void {
   } else {
     refs.syncStatus.textContent = 'Open edit link to connect';
   }
+}
+
+function syncAnnotationEditingUi(): void {
+  const isEnabled = isEditingEnabled();
+  syncAnnotationsTabVisibility(refs, isEnabled);
+  timelineView?.setLocalEditingEnabled(isEnabled);
 }
 
 async function handleImport(event: Event): Promise<void> {

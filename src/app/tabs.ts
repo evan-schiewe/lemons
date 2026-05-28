@@ -10,12 +10,7 @@ export function setupTabSwitching(
     onChartTabShown?: () => void;
   },
 ): void {
-  const annotationsTabButton = Array.from(refs.tabButtons).find(
-    (button) => button.dataset.tab === 'annotations',
-  );
-  if (annotationsTabButton) {
-    annotationsTabButton.hidden = !isLocalEditingEnabled;
-  }
+  syncAnnotationsTabVisibility(refs, isLocalEditingEnabled);
 
   refs.tabButtons.forEach((button) => {
     button.addEventListener('click', (event) => {
@@ -58,6 +53,31 @@ export function setupTabSwitching(
     (button) => button.dataset.tab === 'chart',
   );
   chartTabButton?.click();
+}
+
+export function syncAnnotationsTabVisibility(
+  refs: AppRefs,
+  isVisible: boolean,
+): void {
+  const annotationsTabButton = Array.from(refs.tabButtons).find(
+    (button) => button.dataset.tab === 'annotations',
+  );
+  const annotationsTabContent = Array.from(refs.tabContents).find(
+    (content) => content.id === 'annotations-tab',
+  );
+  if (annotationsTabButton) {
+    annotationsTabButton.hidden = !isVisible;
+  }
+  if (annotationsTabContent) {
+    annotationsTabContent.hidden = !isVisible;
+  }
+
+  if (!isVisible && annotationsTabButton?.classList.contains('active')) {
+    const chartTabButton = Array.from(refs.tabButtons).find(
+      (button) => button.dataset.tab === 'chart',
+    );
+    chartTabButton?.click();
+  }
 }
 
 export function syncDataTabAndActions(refs: AppRefs, hasData: boolean): void {
