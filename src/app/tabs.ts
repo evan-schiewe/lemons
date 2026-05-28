@@ -1,5 +1,16 @@
 import type { AppRefs } from './refs';
 
+const TAB_ROUTES = {
+  chart: '',
+  timeline: 'timeline',
+  annotations: 'annotations',
+  data: 'data',
+} as const;
+
+type TabName = keyof typeof TAB_ROUTES;
+
+const DEFAULT_TAB: TabName = 'chart';
+
 export function setupTabSwitching(
   refs: AppRefs,
   {
@@ -20,39 +31,18 @@ export function setupTabSwitching(
         return;
       }
 
-      refs.tabButtons.forEach((tabButton) => {
-        tabButton.classList.remove('active');
+      activateTab(refs, tabName, {
+        onChartTabShown,
+        updateUrl: true,
       });
-      clickedButton.classList.add('active');
-
-      refs.tabContents.forEach((content) => {
-        content.classList.remove('active');
-      });
-      const activeTab = document.querySelector<HTMLElement>(`#${tabName}-tab`);
-      if (activeTab) {
-        activeTab.classList.add('active');
-        if (tabName === 'chart') {
-          setTimeout(() => onChartTabShown?.(), 50);
-        }
-      }
-
-      localStorage.setItem('activeTab', tabName);
     });
   });
 
-  const savedTab = localStorage.getItem('activeTab') || 'chart';
-  const savedTabButton = Array.from(refs.tabButtons).find(
-    (button) => button.dataset.tab === savedTab && !button.hidden,
-  );
-  if (savedTabButton) {
-    savedTabButton.click();
-    return;
-  }
+  activateTabFromLocation(refs, { onChartTabShown, replaceUrl: true });
 
-  const chartTabButton = Array.from(refs.tabButtons).find(
-    (button) => button.dataset.tab === 'chart',
-  );
-  chartTabButton?.click();
+  window.addEventListener('popstate', () => {
+    activateTabFromLocation(refs, { onChartTabShown });
+  });
 }
 
 export function syncAnnotationsTabVisibility(
@@ -78,6 +68,149 @@ export function syncAnnotationsTabVisibility(
     );
     chartTabButton?.click();
   }
+}
+
+function activateTabFromLocation(
+  refs: AppRefs,
+  {
+    onChartTabShown,
+    replaceUrl = false,
+  }: {
+    onChartTabShown?: () => void;
+    replaceUrl?: boolean;
+  },
+): void {
+  const tabName = getTabNameFromLocation();
+  if (
+    tabName &&
+    activateTab(refs, tabName, {
+      onChartTabShown,
+      replaceUrl,
+      updateUrl: false,
+    })
+  ) {
+    return;
+  }
+
+  activateTab(refs, DEFAULT_TAB, {
+    onChartTabShown,
+    replaceUrl: true,
+    updateUrl: true,
+  });
+}
+
+function activateTab(
+  refs: AppRefs,
+  tabName: string,
+  {
+    onChartTabShown,
+    replaceUrl = false,
+    updateUrl = false,
+  }: {
+    onChartTabShown?: () => void;
+    replaceUrl?: boolean;
+    updateUrl?: boolean;
+  } = {},
+): boolean {
+  if (!isTabName(tabName)) {
+    return false;
+  }
+
+  const clickedButton = Array.from(refs.tabButtons).find(
+    (button) => button.dataset.tab === tabName,
+  );
+  if (!clickedButton || clickedButton.hidden) {
+    return false;
+  }
+
+  refs.tabButtons.forEach((tabButton) => {
+    tabButton.classList.remove('active');
+  });
+  clickedButton.classList.add('active');
+
+  refs.tabContents.forEach((content) => {
+    content.classList.remove('active');
+  });
+  const activeTab = document.querySelector<HTMLElement>(`#${tabName}-tab`);
+  if (activeTab) {
+    activeTab.classList.add('active');
+    if (tabName === 'chart') {
+      setTimeout(() => onChartTabShown?.(), 50);
+    }
+  }
+
+  if (updateUrl) {
+    updateUrlForTab(tabName, replaceUrl);
+  }
+
+  localStorage.setItem('activeTab', tabName);
+  return true;
+}
+
+function isTabName(value: string): value is TabName {
+  return Object.hasOwn(TAB_ROUTES, value);
+}
+
+function getTabNameFromLocation(): TabName | null {
+  const basePath = getBasePath();
+  const basePathWithoutTrailingSlash =
+    basePath.length > 1 ? basePath.slice(0, -1) : basePath;
+  let routePath: string | null = null;
+
+  if (
+    window.location.pathname === basePath ||
+    window.location.pathname === basePathWithoutTrailingSlash
+  ) {
+    routePath = '';
+  } else if (window.location.pathname.startsWith(basePath)) {
+    routePath = window.location.pathname.slice(basePath.length);
+  } else if (basePath !== '/' && window.location.pathname === '/') {
+    routePath = '';
+  }
+
+  if (routePath === null) {
+    return null;
+  }
+
+  const routeSlug = trimSlashes(routePath);
+  const tabRoute = Object.entries(TAB_ROUTES).find(
+    ([, tabSlug]) => tabSlug === routeSlug,
+  );
+
+  return tabRoute ? (tabRoute[0] as TabName) : null;
+}
+
+function updateUrlForTab(tabName: TabName, replaceUrl: boolean): void {
+  const nextUrl = getUrlForTab(tabName);
+  const currentUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+  if (nextUrl === currentUrl) {
+    return;
+  }
+
+  if (replaceUrl) {
+    window.history.replaceState(null, document.title, nextUrl);
+    return;
+  }
+
+  window.history.pushState(null, document.title, nextUrl);
+}
+
+function getUrlForTab(tabName: TabName): string {
+  const url = new URL(window.location.href);
+  const routeSlug = TAB_ROUTES[tabName];
+  const basePath = getBasePath();
+  url.pathname = routeSlug ? `${basePath}${routeSlug}` : basePath;
+  return `${url.pathname}${url.search}${url.hash}`;
+}
+
+function getBasePath(): string {
+  const basePath = new URL(import.meta.env.BASE_URL, window.location.origin)
+    .pathname;
+  return basePath.endsWith('/') ? basePath : `${basePath}/`;
+}
+
+function trimSlashes(value: string): string {
+  return value.replace(/^\/+|\/+$/g, '');
 }
 
 export function syncDataTabAndActions(refs: AppRefs, hasData: boolean): void {

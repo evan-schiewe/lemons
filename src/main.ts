@@ -340,6 +340,11 @@ async function initialize(): Promise<void> {
   setFiltersSidebarOpen(false);
   wireEvents();
   await refreshRaceOptions();
+  setupTabSwitching(refs, {
+    isLocalEditingEnabled: isEditingEnabled(),
+    onChartTabShown: () => charts.lapTime?.resize(),
+  });
+  setupAnnotationSubtabs(refs);
   await refreshView();
   if (getDb().didRefreshBundledDatabase) {
     setAppLoadingState(false);
@@ -454,11 +459,6 @@ function wireEvents(): void {
   window.addEventListener('resize', () => {
     charts.lapTime?.resize();
   });
-  setupTabSwitching(refs, {
-    isLocalEditingEnabled: isEditingEnabled(),
-    onChartTabShown: () => charts.lapTime?.resize(),
-  });
-  setupAnnotationSubtabs(refs);
 }
 
 async function handleSyncConnect(): Promise<void> {
