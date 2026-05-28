@@ -787,6 +787,8 @@ function timelineEventMatchesFilters(
       event.title,
       event.body,
       event.driver_name,
+      event.old_driver_name,
+      event.new_driver_name,
       event.lap_number,
       event.lap_start,
       event.lap_end,
@@ -858,7 +860,7 @@ function buildLapFilterSql(
   alias = '',
   includeRaceId = true,
 ): { whereSql: string; params: SqlParams } {
-  const prefix = alias ? `${alias}.` : '';
+  const prefix = lapSqlPrefix(alias);
   const conditions: string[] = [];
   const params: SqlParams = [];
 
@@ -872,9 +874,14 @@ function buildLapFilterSql(
     params.push(filters.driver);
   }
 
-  if (filters.search) {
-    conditions.push(`${prefix}search_text LIKE ?`);
-    params.push(`%${filters.search.toLowerCase()}%`);
+  const search = `${filters.search ?? ''}`.trim().toLowerCase();
+  if (search) {
+    const { condition, params: searchParams } = buildLapSearchCondition(
+      alias,
+      `%${search}%`,
+    );
+    conditions.push(condition);
+    params.push(...searchParams);
   }
 
   if (typeof filters.lapMin === 'number' && Number.isFinite(filters.lapMin)) {
@@ -901,6 +908,120 @@ function buildLapFilterSql(
 }
 
 function resolvedDriverNameSql(alias = ''): string {
-  const prefix = alias ? `${alias}.` : '';
+  const prefix = lapSqlPrefix(alias);
   return `COALESCE((SELECT ds.driver_name FROM driver_stints ds WHERE ds.race_id = ${prefix}race_id AND ${prefix}lap_number BETWEEN ds.start_lap AND ds.end_lap ORDER BY ds.updated_at DESC, ds.start_lap DESC LIMIT 1), ${prefix}driver_name)`;
+}
+
+function lapSqlPrefix(alias = ''): string {
+  return alias ? `${alias}.` : 'normalized_laps.';
+}
+
+function buildLapSearchCondition(
+  alias: string,
+  likeSearch: string,
+): { condition: string; params: SqlParams } {
+  const prefix = lapSqlPrefix(alias);
+  const raceColumn = `${prefix}race_id`;
+  const lapColumn = `${prefix}lap_number`;
+  const params: SqlParams = [];
+
+  const like = (expression: string): string => {
+    params.push(likeSearch);
+    return `${expression} LIKE ?`;
+  };
+
+  const textExpr = (expression: string): string =>
+    `LOWER(COALESCE(CAST(${expression} AS TEXT), ''))`;
+
+  const conditions = [
+    like(textExpr(`${prefix}search_text`)),
+    like(textExpr(resolvedDriverNameSql(alias))),
+    like(textExpr(lapColumn)),
+    like(textExpr(`${prefix}lap_time_text`)),
+    like(textExpr(`${prefix}gap_ahead_display`)),
+    like(textExpr(`${prefix}gap_leader_display`)),
+    like(textExpr(`${prefix}position_value`)),
+    like(textExpr(`${prefix}speed_mph`)),
+    `(${like("LOWER('pit')")} AND ${buildAutoPitCondition(alias)})`,
+    `(${like("LOWER('outlier')")} AND COALESCE(${prefix}is_outlier, 0) <> 0)`,
+    `EXISTS (
+      SELECT 1
+      FROM lap_notes ln
+      WHERE ln.race_id = ${raceColumn}
+        AND ln.lap_number = ${lapColumn}
+        AND (
+          ${like("LOWER('lap note')")}
+          OR ${like(textExpr('ln.note_text'))}
+          OR ${like(textExpr('ln.driver_name'))}
+        )
+    )`,
+    `EXISTS (
+      SELECT 1
+      FROM tagged_incidents ti
+      WHERE ti.race_id = ${raceColumn}
+        AND ti.lap_number = ${lapColumn}
+        AND (
+          ${like("LOWER('incident')")}
+          OR ${like(textExpr('ti.title'))}
+          OR ${like(textExpr('ti.tag'))}
+          OR ${like(textExpr('ti.details'))}
+        )
+    )`,
+    `EXISTS (
+      SELECT 1
+      FROM range_events re
+      WHERE re.race_id = ${raceColumn}
+        AND ${lapColumn} BETWEEN re.start_lap AND re.end_lap
+        AND (
+          ${like("LOWER('range event')")}
+          OR ${like(textExpr('re.title'))}
+          OR ${like(textExpr('re.tag'))}
+          OR ${like(textExpr('re.details'))}
+        )
+    )`,
+    `EXISTS (
+      SELECT 1
+      FROM driver_stints ds_search
+      WHERE ds_search.race_id = ${raceColumn}
+        AND ${lapColumn} BETWEEN ds_search.start_lap AND ds_search.end_lap
+        AND (
+          ${like("LOWER('driver stint')")}
+          OR ${like(textExpr('ds_search.driver_name'))}
+          OR ${like(textExpr('ds_search.notes'))}
+        )
+    )`,
+  ];
+
+  return {
+    condition: `(${conditions.join(' OR ')})`,
+    params,
+  };
+}
+
+function buildAutoPitCondition(alias = ''): string {
+  const prefix = lapSqlPrefix(alias);
+
+  if (alias === 'race_laps') {
+    return `(
+      ${prefix}next_display_driver_name IS NOT NULL
+      AND COALESCE(${prefix}display_driver_name, '') <> ''
+      AND ${prefix}display_driver_name <> ${prefix}next_display_driver_name
+    )`;
+  }
+
+  const currentDriverSql = resolvedDriverNameSql(alias);
+  const nextDriverSql = `(
+    SELECT ${resolvedDriverNameSql('next_lap')}
+    FROM normalized_laps next_lap
+    WHERE next_lap.race_id = ${prefix}race_id
+      AND next_lap.lap_number > ${prefix}lap_number
+    ORDER BY next_lap.lap_number ASC
+    LIMIT 1
+  )`;
+
+  return `(
+    ${nextDriverSql} IS NOT NULL
+    AND COALESCE(${currentDriverSql}, '') <> ''
+    AND ${currentDriverSql} <> ${nextDriverSql}
+  )`;
 }
