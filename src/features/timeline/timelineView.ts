@@ -702,6 +702,16 @@ function renderEventCard(
 
   const isJournal = eventItem.event_type === 'journalEntry';
   const isDriverSwitch = eventItem.event_type === 'driverSwitch';
+  const journalActions = [
+    isJournal && isLocalEditingEnabled
+      ? `<button type="button" class="button ghost" data-action="edit-journal" data-id="${escapeHtml(eventItem.source_id)}">Edit</button>`
+      : '',
+    isJournal && isLocalEditingEnabled
+      ? `<button type="button" class="button ghost" data-action="delete-journal" data-id="${escapeHtml(eventItem.source_id)}">Delete</button>`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('');
 
   if (isDriverSwitch) {
     return renderDriverSwitchCard(eventItem, timeLabel, lapLabel);
@@ -719,14 +729,10 @@ function renderEventCard(
                 <div class="timeline-card-meta">
                     <span class="timeline-card-badge">${escapeHtml(eventItem.event_label || eventItem.event_type)}</span>
                     <span class="timeline-card-time">${escapeHtml(timeLabel)}</span>
-                    <span class="timeline-card-lap">${escapeHtml(lapLabel)}</span>
+                    ${renderTimelineLapMeta(lapLabel, eventItem.lap_number)}
                     ${eventItem.driver_name ? `<span class="timeline-card-driver">${escapeHtml(eventItem.driver_name)}</span>` : ''}
                 </div>
-                <div class="timeline-card-actions">
-                    ${Number.isInteger(eventItem.lap_number) ? `<button type="button" class="button ghost" data-action="jump-lap" data-lap-number="${eventItem.lap_number}">Jump to Lap</button>` : ''}
-                    ${isJournal && isLocalEditingEnabled ? `<button type="button" class="button ghost" data-action="edit-journal" data-id="${escapeHtml(eventItem.source_id)}">Edit</button>` : ''}
-                    ${isJournal && isLocalEditingEnabled ? `<button type="button" class="button ghost" data-action="delete-journal" data-id="${escapeHtml(eventItem.source_id)}">Delete</button>` : ''}
-                </div>
+                ${journalActions ? `<div class="timeline-card-actions">${journalActions}</div>` : ''}
             </header>
             <h4 class="timeline-card-title">${escapeHtml(eventItem.title || 'Untitled Event')}</h4>
             ${eventItem.body ? `<p class="timeline-card-body">${escapeHtml(eventItem.body)}</p>` : ''}
@@ -758,15 +764,40 @@ function renderDriverSwitchCard(
                 <div class="timeline-card-meta">
                     <span class="timeline-card-badge">${escapeHtml(eventItem.event_label || eventItem.event_type)}</span>
                     <span class="timeline-card-time">${escapeHtml(timeLabel)}</span>
-                    <span class="timeline-card-lap">${escapeHtml(lapLabel)}</span>
+                    ${renderTimelineLapMeta(lapLabel, eventItem.lap_number)}
                     <span class="timeline-card-driver-switch-inline">${escapeHtml(driverTransition)}</span>
-                </div>
-                <div class="timeline-card-actions">
-                    ${Number.isInteger(eventItem.lap_number) ? `<button type="button" class="button ghost" data-action="jump-lap" data-lap-number="${eventItem.lap_number}">Jump to Lap</button>` : ''}
                 </div>
             </header>
         </article>
     `;
+}
+
+function renderTimelineLapMeta(
+  lapLabel: string,
+  lapNumber: number | null,
+): string {
+  if (!lapLabel) {
+    return '';
+  }
+
+  const lapInfoButton = Number.isInteger(lapNumber)
+    ? `<button
+            type="button"
+            class="timeline-card-lap-info"
+            data-action="jump-lap"
+            data-lap-number="${escapeHtml(lapNumber)}"
+            aria-label="Inspect lap ${escapeHtml(lapNumber)}"
+            title="Inspect lap ${escapeHtml(lapNumber)}"
+        >
+            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M12 11v5" />
+                <path d="M12 8h.01" />
+            </svg>
+        </button>`
+    : '';
+
+  return `<span class="timeline-card-lap">${escapeHtml(lapLabel)}${lapInfoButton}</span>`;
 }
 
 function computeLapIso(

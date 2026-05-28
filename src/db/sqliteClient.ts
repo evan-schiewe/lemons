@@ -1,5 +1,6 @@
 import initSqlJs from 'sql.js';
 import sqlWasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
+import defaultDatabaseUrl from '../assets/default-data.sqlite?url';
 import { normalizeRaceData } from '../model/normalizeRaceData';
 import type {
   CloudRaceMetadata,
@@ -11,11 +12,19 @@ import type {
 import schemaSql from './schema.sql?raw';
 
 const DATABASE_FILE_NAME = 'lemons-race-viewer.sqlite';
-const DEFAULT_DATABASE_URL = './assets/default-data.sqlite';
+const DEFAULT_DATABASE_URL = defaultDatabaseUrl;
+const DEFAULT_DATABASE_VERSION = `asset:${defaultDatabaseUrl}`;
 const STORAGE_SOURCE_KEY = 'lemons-race-viewer-db-source';
 const STORAGE_BUNDLE_VERSION_KEY = 'lemons-race-viewer-bundle-version';
 const STORAGE_SOURCE_BUNDLE = 'bundle';
 const STORAGE_SOURCE_CUSTOM = 'custom';
+const BUNDLED_OPERATIONAL_TABLES = [
+  'sync_config',
+  'sync_race_cursors',
+  'sync_outbox',
+  'sync_race_outbox',
+  'annotation_tombstones',
+];
 
 const RACE_ARTIFACT_RACE_COLUMNS = [
   'id',
@@ -830,16 +839,13 @@ export class SQLiteClient {
   async loadPersistedBytes(): Promise<Uint8Array | null> {
     this.didRefreshBundledDatabase = false;
 
-    const bundledVersion = await this.fetchBundledVersion();
     const opfsBytes = await this.readFromOpfs();
     if (opfsBytes?.length) {
       const source = this.getStorageSource();
       const storedBundleVersion = this.getStoredBundleVersion();
       const shouldRefreshBundledCopy =
-        source !== STORAGE_SOURCE_CUSTOM &&
-        bundledVersion &&
-        storedBundleVersion &&
-        bundledVersion !== storedBundleVersion;
+        source === STORAGE_SOURCE_BUNDLE &&
+        storedBundleVersion !== DEFAULT_DATABASE_VERSION;
 
       if (shouldRefreshBundledCopy) {
         await this.deleteFromOpfs();
@@ -851,21 +857,11 @@ export class SQLiteClient {
     }
 
     // First-run: fetch bundled default data
-    try {
-      const response = await fetch(DEFAULT_DATABASE_URL);
-      if (response.ok) {
-        const arrayBuffer = await response.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-        if (bytes.length > 0) {
-          const resolvedVersion =
-            bundledVersion ?? this.resolveBundleVersion(response.headers);
-          this.recordBundleSeed(resolvedVersion);
-          this.storageMode = 'memory'; // Will persist to OPFS on next persist()
-          return bytes;
-        }
-      }
-    } catch (error) {
-      console.warn('Failed to fetch default-data.sqlite:', error);
+    const bundledBytes = await this.fetchBundledDatabaseBytes();
+    if (bundledBytes?.length) {
+      this.recordBundleSeed(DEFAULT_DATABASE_VERSION);
+      this.storageMode = 'memory'; // Will persist to OPFS on next persist()
+      return bundledBytes;
     }
 
     // Empty database (no OPFS, no default file)
@@ -888,6 +884,36 @@ export class SQLiteClient {
     this.db.run(schemaSql);
     this.applyMigrations(this.db);
     this.storageMode = 'memory';
+  }
+
+  async resetToBundledDatabase(): Promise<void> {
+    const bundledBytes = await this.fetchBundledDatabaseBytes();
+    if (!bundledBytes?.length) {
+      throw new Error('Bundled starter data is not available.');
+    }
+
+    const SQL = this.requireSql();
+    const resetDatabase = new SQL.Database(bundledBytes);
+    const previousDb = this.db;
+
+    try {
+      resetDatabase.run(schemaSql);
+      this.applyMigrations(resetDatabase);
+      this.clearBundledOperationalState(resetDatabase);
+
+      this.db = resetDatabase;
+      await this.deleteFromOpfs();
+      await this.persist();
+      this.recordBundleSeed(DEFAULT_DATABASE_VERSION);
+
+      if (previousDb) {
+        previousDb.close();
+      }
+    } catch (error) {
+      this.db = previousDb;
+      resetDatabase.close();
+      throw error;
+    }
   }
 
   markRestoredSyncAsReconnectRequired(database: SqlJsDatabase): void {
@@ -999,36 +1025,48 @@ export class SQLiteClient {
     }
   }
 
-  resolveBundleVersion(headers: Headers): string | null {
-    const etag = headers.get('etag');
-    if (etag) {
-      return `etag:${etag}`;
-    }
-
-    const lastModified = headers.get('last-modified');
-    const contentLength = headers.get('content-length');
-    if (lastModified || contentLength) {
-      return `lm:${lastModified || 'unknown'}|len:${contentLength || 'unknown'}`;
-    }
-
-    return null;
-  }
-
-  async fetchBundledVersion(): Promise<string | null> {
+  async fetchBundledDatabaseBytes(): Promise<Uint8Array | null> {
     try {
       const response = await fetch(DEFAULT_DATABASE_URL, {
-        method: 'HEAD',
         cache: 'no-store',
       });
-
       if (!response.ok) {
         return null;
       }
 
-      return this.resolveBundleVersion(response.headers);
-    } catch {
+      const arrayBuffer = await response.arrayBuffer();
+      const bytes = new Uint8Array(arrayBuffer);
+      if (!bytes.length) {
+        return null;
+      }
+
+      return this.sanitizeBundledDatabaseBytes(bytes);
+    } catch (error) {
+      console.warn('Failed to fetch default-data.sqlite:', error);
       return null;
     }
+  }
+
+  sanitizeBundledDatabaseBytes(bytes: Uint8Array): Uint8Array {
+    const SQL = this.requireSql();
+    const bundledDatabase = new SQL.Database(bytes);
+
+    try {
+      bundledDatabase.run(schemaSql);
+      this.applyMigrations(bundledDatabase);
+      this.clearBundledOperationalState(bundledDatabase);
+      return bundledDatabase.export();
+    } finally {
+      bundledDatabase.close();
+    }
+  }
+
+  clearBundledOperationalState(database: SqlJsDatabase): void {
+    BUNDLED_OPERATIONAL_TABLES.forEach((tableName) => {
+      if (this.tableExists(database, tableName)) {
+        database.run(`DELETE FROM ${tableName}`);
+      }
+    });
   }
 
   private requireDb(): SqlJsDatabase {

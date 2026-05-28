@@ -9,6 +9,7 @@ export interface AppRefs {
   sqliteInput: HTMLInputElement;
   exportJson: HTMLButtonElement;
   exportSqlite: HTMLButtonElement;
+  resetStarterData: HTMLButtonElement;
   syncControls: HTMLElement;
   syncStatus: HTMLElement;
   syncConnect: HTMLButtonElement;
@@ -45,6 +46,7 @@ export function createAppRefs(): AppRefs {
     sqliteInput: queryRequired<HTMLInputElement>('#sqlite-input'),
     exportJson: queryRequired<HTMLButtonElement>('#export-json'),
     exportSqlite: queryRequired<HTMLButtonElement>('#export-sqlite'),
+    resetStarterData: queryRequired<HTMLButtonElement>('#reset-starter-data'),
     syncControls: queryRequired<HTMLElement>('#sync-controls'),
     syncStatus: queryRequired<HTMLElement>('#sync-status'),
     syncConnect: queryRequired<HTMLButtonElement>('#sync-connect'),

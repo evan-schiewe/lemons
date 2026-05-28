@@ -3,6 +3,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   base: '/lemons/',
+  assetsInclude: ['**/*.sqlite'],
   build: {
     chunkSizeWarningLimit: 700,
     rollupOptions: {

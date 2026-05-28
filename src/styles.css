@@ -1218,6 +1218,47 @@ tbody tr.is-selected {
   color: var(--color-text-muted);
 }
 
+.timeline-card-lap {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.timeline-card-lap-info {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+.timeline-card-lap-info:hover,
+.timeline-card-lap-info:focus-visible {
+  color: var(--color-accent);
+  background: var(--color-surface-muted);
+}
+
+.timeline-card-lap-info:focus-visible {
+  outline: 2px solid var(--color-focus-ring);
+  outline-offset: 2px;
+}
+
+.timeline-card-lap-info svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .timeline-card-driver,
 .timeline-card-driver-switch-inline {
   font-size: 0.82rem;

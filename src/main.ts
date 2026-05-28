@@ -370,6 +370,7 @@ function wireEvents(): void {
   });
   refs.csvInput.addEventListener('change', handleImport);
   refs.sqliteInput.addEventListener('change', handleRestoreSqlite);
+  refs.resetStarterData.addEventListener('click', handleResetStarterData);
   refs.raceSelect.addEventListener('change', async (event) => {
     state.activeRaceId = (event.currentTarget as HTMLSelectElement).value;
     state.selectedLapId = '';
@@ -627,6 +628,38 @@ async function handleRestoreSqlite(event: Event): Promise<void> {
     console.error(error);
     refs.sqliteInput.value = '';
     setStatus(`SQLite restore failed: ${errorMessage(error)}`);
+  }
+}
+
+async function handleResetStarterData(): Promise<void> {
+  const didConfirm = window.confirm(
+    'Replace this browser SQLite cache with the latest starter data? Local imports and annotations in this browser will be removed unless exported first.',
+  );
+  if (!didConfirm) {
+    return;
+  }
+
+  try {
+    setStatus('Resetting starter data...');
+    await getDb().resetToBundledDatabase();
+
+    state.activeRaceId = '';
+    state.selectedLapId = '';
+    state.helperCurrentIndex = 0;
+    state.lapRangeBounds = null;
+    state.lapRangeRaceId = '';
+    syncController?.reloadFromDatabase();
+
+    await refreshRaceOptions();
+    await refreshView();
+
+    const raceCount = state.races.length;
+    setStatus(
+      `Starter data reset complete. Loaded ${raceCount} race${raceCount === 1 ? '' : 's'}.`,
+    );
+  } catch (error) {
+    console.error(error);
+    setStatus(`Starter data reset failed: ${errorMessage(error)}`);
   }
 }
 
