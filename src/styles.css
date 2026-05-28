@@ -1291,7 +1291,7 @@ tbody tr.is-selected {
 
 @media (max-width: 780px) {
   .sticky-chart-panel {
-    padding: 12px 10px;
+    padding: 10px 4px;
   }
 
   .annotation-editor-intro {

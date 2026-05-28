@@ -196,6 +196,7 @@ export function createLapTimeChart(
             ? Math.max(...lapNumbers)
             : 1;
       lapAxisBounds = { min: lapAxisMin, max: lapAxisMax };
+      const gridGutters = getChartGridGutters(element);
       const lapTimePoints = rows
         .filter((row) => Number.isFinite(row.lap_time_ms))
         .map((row) => ({
@@ -306,15 +307,6 @@ export function createLapTimeChart(
         1,
         'diamond',
       );
-      const stintNoteSeries = buildIncidentScatter(
-        'Lap Notes',
-        annotations.lapNotes,
-        1,
-        CHART_COLOR_TOKENS.lapNoteMarker,
-        1,
-        1,
-        'circle',
-      );
 
       const positionSeries = [
         {
@@ -382,7 +374,6 @@ export function createLapTimeChart(
         rangeEventSeries.name,
         stintSeries.name,
         stintIncidentSeries.name,
-        stintNoteSeries.name,
       ];
       const bottomLegendNames = [
         ...positionSeries.map((series) => series.name),
@@ -432,17 +423,23 @@ export function createLapTimeChart(
           },
         ],
         grid: [
-          { left: 56, right: 72, top: 40, height: '33%', containLabel: false },
           {
-            left: 56,
-            right: 72,
+            left: gridGutters.left,
+            right: gridGutters.right,
+            top: 40,
+            height: '33%',
+            containLabel: false,
+          },
+          {
+            left: gridGutters.left,
+            right: gridGutters.right,
             top: '47%',
             height: '14%',
             containLabel: false,
           },
           {
-            left: 56,
-            right: 72,
+            left: gridGutters.left,
+            right: gridGutters.right,
             top: '69%',
             height: '13%',
             containLabel: false,
@@ -531,7 +528,6 @@ export function createLapTimeChart(
           rangeEventSeries,
           stintSeries,
           stintIncidentSeries,
-          stintNoteSeries,
           ...positionSeries,
           ...gapSeries,
         ],
@@ -721,6 +717,22 @@ function getSinglePointSegments<T extends { lapNumber: number }>(
   });
 }
 
+function getChartGridGutters(element: HTMLElement): {
+  left: number;
+  right: number;
+} {
+  const width = element.clientWidth;
+  if (width <= 520) {
+    return { left: 40, right: 28 };
+  }
+
+  if (width <= 760) {
+    return { left: 48, right: 44 };
+  }
+
+  return { left: 56, right: 72 };
+}
+
 function allowPageWheelScroll(element: HTMLElement): void {
   element.addEventListener(
     'wheel',
@@ -810,24 +822,24 @@ function buildStintLaneModel(driverStints: DriverStint[]) {
 
   const driverCount = orderedDrivers.length;
   orderedDrivers.forEach((driverName, index) => {
-    // Reserve lanes 0 and 1 for incidents/notes; place first driver at top.
-    laneByDriver.set(driverName, driverCount - index + 1);
+    // Reserve lane 0 for incidents; place first driver at top.
+    laneByDriver.set(driverName, driverCount - index);
   });
 
-  const labels: string[] = ['Incidents', 'Lap Notes'];
+  const labels: string[] = ['Incidents'];
   laneByDriver.forEach((laneIndex, driverName) => {
     labels[laneIndex] = driverName;
   });
 
   const driverColorByName = new Map<string, string>();
   laneByDriver.forEach((laneIndex, driverName) => {
-    driverColorByName.set(driverName, buildDriverLaneColor(laneIndex - 2));
+    driverColorByName.set(driverName, buildDriverLaneColor(laneIndex - 1));
   });
 
   const stints = sortedStints.map((stint) => {
     const driverName =
       (stint.driver_name || 'Unknown driver').trim() || 'Unknown driver';
-    const laneIndex = laneByDriver.get(driverName) ?? 2;
+    const laneIndex = laneByDriver.get(driverName) ?? 1;
     const color = driverColorByName.get(driverName) ?? buildDriverLaneColor(0);
 
     return {
