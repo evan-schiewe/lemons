@@ -299,8 +299,8 @@ h1 {
   position: static;
   background: var(--color-surface-panel-solid);
   border-bottom: 1px solid var(--color-border);
-  margin: 0 -16px 20px;
-  width: calc(100% + 32px);
+  margin: 0 calc(50% - 50vw) 20px;
+  width: 100vw;
   padding: 16px;
 }
 
@@ -309,7 +309,10 @@ h1 {
   gap: 0;
   background: var(--color-surface-panel-solid);
   margin-bottom: 12px;
+  border: 1px solid var(--color-border);
   border-bottom: 2px solid var(--color-border);
+  border-radius: 8px;
+  overflow: hidden;
 }
 
 .tab-button {
@@ -1149,8 +1152,6 @@ tbody tr.is-selected {
 
 @media (max-width: 780px) {
   .sticky-chart-panel {
-    margin: 0 -10px 20px;
-    width: calc(100% + 20px);
     padding: 12px 10px;
   }
 
