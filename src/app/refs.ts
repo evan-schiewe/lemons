@@ -13,6 +13,9 @@ export interface AppRefs {
   syncStatus: HTMLElement;
   syncConnect: HTMLButtonElement;
   raceSelect: HTMLSelectElement;
+  filtersPanel: HTMLElement;
+  filtersToggle: HTMLButtonElement;
+  filtersClose: HTMLButtonElement;
   driverFilter: HTMLSelectElement;
   searchFilter: HTMLInputElement;
   lapMin: HTMLInputElement;
@@ -46,6 +49,9 @@ export function createAppRefs(): AppRefs {
     syncStatus: queryRequired<HTMLElement>('#sync-status'),
     syncConnect: queryRequired<HTMLButtonElement>('#sync-connect'),
     raceSelect: queryRequired<HTMLSelectElement>('#race-select'),
+    filtersPanel: queryRequired<HTMLElement>('#filters-sidebar'),
+    filtersToggle: queryRequired<HTMLButtonElement>('#filters-toggle'),
+    filtersClose: queryRequired<HTMLButtonElement>('#filters-close'),
     driverFilter: queryRequired<HTMLSelectElement>('#driver-filter'),
     searchFilter: queryRequired<HTMLInputElement>('#search-filter'),
     lapMin: queryRequired<HTMLInputElement>('#lap-min'),

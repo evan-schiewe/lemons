@@ -351,6 +351,18 @@ h1 {
   display: block;
 }
 
+#chart-tab.active {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  align-items: start;
+  min-width: 0;
+}
+
+#chart-tab.active.filters-sidebar-open {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
+}
+
 .sticky-content {
   margin: 0;
   box-shadow: none;
@@ -391,6 +403,94 @@ h1 {
 
 .controls-panel .panel-header {
   margin-bottom: 10px;
+}
+
+.filters-sidebar {
+  display: none;
+  grid-column: 2;
+  grid-row: 1 / span 4;
+  position: sticky;
+  top: 16px;
+  width: 100%;
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+
+.filters-sidebar.is-open {
+  display: block;
+}
+
+.filters-close-button,
+.filters-sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  cursor: pointer;
+}
+
+.filters-close-button {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  background: var(--color-surface-control);
+  color: var(--color-text-secondary);
+}
+
+.filters-close-button svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.filters-sidebar-toggle {
+  justify-self: end;
+  width: 52px;
+  height: 52px;
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+  box-shadow:
+    inset 0 -3px 0 var(--color-highlight),
+    0 14px 34px rgb(var(--brand-black-rgb) / 0.28);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    filter 140ms ease;
+}
+
+.filters-sidebar-toggle.is-hidden {
+  display: none;
+}
+
+.filters-sidebar-toggle:hover,
+.filters-close-button:hover {
+  filter: brightness(1.05);
+}
+
+.filters-sidebar-toggle svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+@keyframes filters-card-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 .panel-subtitle,
@@ -470,6 +570,13 @@ textarea {
   padding: 12px;
 }
 
+#chart-tab .chart-panel,
+#chart-tab .dashboard-grid,
+#chart-tab .table-panel {
+  grid-column: 1;
+  min-width: 0;
+}
+
 .summary-card {
   padding: 18px 12px 18px 18px;
   border-radius: 18px;
@@ -543,6 +650,8 @@ textarea {
 
 .chart-surface {
   width: 100%;
+  min-width: 0;
+  max-width: 100%;
   height: 360px;
 }
 
@@ -1143,6 +1252,19 @@ tbody tr.is-selected {
   .tab-button {
     padding: 10px 14px;
     font-size: 0.9rem;
+  }
+
+  #chart-tab.active.filters-sidebar-open {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .filters-sidebar.is-open {
+    grid-column: 1;
+    grid-row: auto;
+    position: static;
+    max-height: none;
+    overflow: visible;
+    animation: filters-card-slide-in 180ms ease;
   }
 
   .timeline-layout {

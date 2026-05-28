@@ -314,22 +314,37 @@ async function initialize(): Promise<void> {
     isLocalEditingEnabled: isEditingEnabled(),
   });
 
+  setFiltersSidebarOpen(false);
   wireEvents();
   await refreshRaceOptions();
   await refreshView();
   if (getDb().didRefreshBundledDatabase) {
     setAppLoadingState(false);
     setStatus(
-      'Ready. Detected a newer deployment and refreshed the local bundled database cache.',
+      `${getReadyStatus()} Detected a newer deployment and refreshed the local bundled database cache.`,
     );
     return;
   }
 
   setAppLoadingState(false);
-  setStatus('Ready. Import lap CSV files or restore a SQLite export to begin.');
+  setStatus(getReadyStatus());
 }
 
 function wireEvents(): void {
+  refs.filtersToggle.addEventListener('click', () => {
+    setFiltersSidebarOpen(true);
+    refs.raceSelect.focus();
+  });
+  refs.filtersClose.addEventListener('click', () => {
+    setFiltersSidebarOpen(false);
+    refs.filtersToggle.focus();
+  });
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && isFiltersSidebarOpen()) {
+      setFiltersSidebarOpen(false);
+      refs.filtersToggle.focus();
+    }
+  });
   refs.csvInput.addEventListener('change', handleImport);
   refs.sqliteInput.addEventListener('change', handleRestoreSqlite);
   refs.raceSelect.addEventListener('change', async (event) => {
@@ -337,6 +352,7 @@ function wireEvents(): void {
     state.selectedLapId = '';
     await refreshDriverOptions();
     await refreshView();
+    setStatus(getReadyStatus());
   });
   refs.driverFilter.addEventListener('change', () => {
     refreshView();
@@ -833,6 +849,30 @@ function getBaseFilters(): LapFilters {
   };
 }
 
+function isFiltersSidebarOpen(): boolean {
+  return refs.filtersPanel.classList.contains('is-open');
+}
+
+function setFiltersSidebarOpen(isOpen: boolean): void {
+  refs.filtersPanel.parentElement?.classList.toggle(
+    'filters-sidebar-open',
+    isOpen,
+  );
+  refs.filtersPanel.classList.toggle('is-open', isOpen);
+  refs.filtersPanel.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  refs.filtersPanel.inert = !isOpen;
+  refs.filtersToggle.classList.toggle('is-hidden', isOpen);
+  refs.filtersToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  refs.filtersToggle.setAttribute(
+    'aria-label',
+    isOpen ? 'Filters open' : 'Open filters',
+  );
+  refs.filtersToggle.title = isOpen ? 'Filters open' : 'Open filters';
+  requestAnimationFrame(() => {
+    charts.lapTime?.resize();
+  });
+}
+
 async function handleLapSelectionByNumber(lapNumber: number): Promise<void> {
   const selectedRow = state.currentRows.find(
     (row) => row.lap_number === lapNumber,
@@ -893,6 +933,22 @@ function setStatus(message: string): void {
   if (refs.appInitStatus && document.body.classList.contains('app-loading')) {
     refs.appInitStatus.textContent = message;
   }
+}
+
+function getReadyStatus(): string {
+  if (!state.activeRaceId) {
+    return 'Ready. Import lap CSV files or restore a SQLite export to begin.';
+  }
+
+  const activeRace = state.races.find((race) => race.id === state.activeRaceId);
+  const raceName = activeRace?.name || 'Race';
+  const lapCount =
+    typeof activeRace?.row_count === 'number' &&
+    Number.isFinite(activeRace.row_count)
+      ? ` (${activeRace.row_count} laps)`
+      : '';
+
+  return `Ready. ${raceName} loaded${lapCount}.`;
 }
 
 function setAppLoadingState(isLoading: boolean): void {

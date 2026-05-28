@@ -68,12 +68,30 @@
           </div>
           <div class="tab-content-wrapper">
             <div id="chart-tab" class="tab-content active">
+              <button
+                id="filters-toggle"
+                class="filters-sidebar-toggle"
+                type="button"
+                aria-controls="filters-sidebar"
+                aria-expanded="false"
+                aria-label="Open filters"
+                title="Open filters"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 6h16M7 12h10M10 18h4" />
+                </svg>
+              </button>
               <section class="panel chart-panel sticky-content">
                 <div id="lap-time-chart" class="chart-surface"></div>
               </section>
-              <section class="panel controls-panel">
+              <section id="filters-sidebar" class="panel controls-panel filters-sidebar" aria-label="Filters">
                 <div class="panel-header">
                   <h2>Filters</h2>
+                  <button id="filters-close" class="filters-close-button" type="button" aria-label="Close filters" title="Close filters">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                      <path d="M6 6 18 18M18 6 6 18" />
+                    </svg>
+                  </button>
                 </div>
                 <div class="filters-grid">
                   <label>

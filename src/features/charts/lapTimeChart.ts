@@ -100,6 +100,23 @@ export function createLapTimeChart(
   let lapAxisBounds = { min: 0, max: 1 };
   let suppressZoomEvent = false;
   let zoomSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  let resizeAnimationFrame: number | null = null;
+
+  const scheduleResize = (): void => {
+    if (resizeAnimationFrame !== null) {
+      cancelAnimationFrame(resizeAnimationFrame);
+    }
+
+    resizeAnimationFrame = requestAnimationFrame(() => {
+      resizeAnimationFrame = null;
+      chart.resize();
+    });
+  };
+
+  const resizeObserver = new ResizeObserver(() => {
+    scheduleResize();
+  });
+  resizeObserver.observe(element);
 
   chart.on('click', (params: unknown) => {
     const lapNumber = (params as ChartClickParams)?.data?.lapNumber;
@@ -178,6 +195,14 @@ export function createLapTimeChart(
             ? Math.max(...lapNumbers)
             : 1;
       lapAxisBounds = { min: lapAxisMin, max: lapAxisMax };
+      const lapTimePoints = rows
+        .filter((row) => Number.isFinite(row.lap_time_ms))
+        .map((row) => ({
+          value: [row.lap_number, Number(row.lap_time_ms) / 1000],
+          lapNumber: row.lap_number,
+          outlier: row.is_outlier === 1,
+          driverName: row.driver_name,
+        }));
       const lapSeries = [
         {
           name: 'Lap Times',
@@ -188,16 +213,19 @@ export function createLapTimeChart(
           itemStyle: { color: CHART_COLOR_TOKENS.lapLine },
           xAxisIndex: 0,
           yAxisIndex: 0,
-          data: withGaps(
-            rows
-              .filter((row) => Number.isFinite(row.lap_time_ms))
-              .map((row) => ({
-                value: [row.lap_number, Number(row.lap_time_ms) / 1000],
-                lapNumber: row.lap_number,
-                outlier: row.is_outlier === 1,
-                driverName: row.driver_name,
-              })),
-          ),
+          data: withGaps(lapTimePoints),
+        },
+        {
+          name: 'Lap Times Single Points',
+          type: 'scatter',
+          symbol: 'circle',
+          symbolSize: 9,
+          itemStyle: { color: CHART_COLOR_TOKENS.lapLine },
+          xAxisIndex: 0,
+          yAxisIndex: 0,
+          data: getSinglePointSegments(lapTimePoints),
+          tooltip: { show: false },
+          z: 4,
         },
       ];
 
@@ -348,7 +376,7 @@ export function createLapTimeChart(
         },
       ];
 
-      const topLegendNames = [...lapSeries.map((series) => series.name)];
+      const topLegendNames = ['Lap Times'];
       const middleLegendNames = [
         rangeEventSeries.name,
         stintSeries.name,
@@ -515,7 +543,7 @@ export function createLapTimeChart(
       });
     },
     resize() {
-      chart.resize();
+      scheduleResize();
     },
     setLapRange(
       lapMin: number | null | undefined,
@@ -687,6 +715,21 @@ function withGaps<T extends { lapNumber: number }>(
     result.push(points[i]);
   }
   return result;
+}
+
+function getSinglePointSegments<T extends { lapNumber: number }>(
+  points: T[],
+): T[] {
+  return points.filter((point, index) => {
+    const previous = points[index - 1] ?? null;
+    const next = points[index + 1] ?? null;
+    const hasPreviousNeighbor =
+      previous !== null && point.lapNumber - previous.lapNumber <= 1;
+    const hasNextNeighbor =
+      next !== null && next.lapNumber - point.lapNumber <= 1;
+
+    return !hasPreviousNeighbor && !hasNextNeighbor;
+  });
 }
 
 function buildRangeAreas(rangeEvents: RangeEvent[]) {
