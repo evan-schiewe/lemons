@@ -1255,7 +1255,7 @@ tbody tr.is-selected {
 }
 
 .timeline-card-driver-switch .timeline-card-header {
-  align-items: center;
+  align-items: flex-start;
 }
 
 .timeline-empty {
