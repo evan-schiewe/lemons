@@ -32,6 +32,7 @@ interface HistogramCard {
   label: string;
   value?: string;
   note?: string;
+  labelActionHtml?: string;
   visualHtml?: string;
   chartData?: {
     bins: HistogramBin[];
@@ -92,7 +93,10 @@ export function renderSummaryCards(
     .map(
       (card) => `
         <article class="summary-card">
-          <span>${escapeHtml(card.label)}</span>
+          <div class="summary-card-header">
+            <span>${escapeHtml(card.label)}</span>
+            ${card.labelActionHtml ?? ''}
+          </div>
           ${card.visualHtml ?? `<strong>${escapeHtml(card.value)}</strong>`}
           ${card.note ? `<small class="summary-card-note">${escapeHtml(card.note)}</small>` : ''}
         </article>
@@ -182,18 +186,20 @@ function buildLapHistogramCard(
 
   return {
     label: 'Lap Time Histogram',
+    labelActionHtml: `
+          <button
+            class="summary-card-expand-btn"
+            type="button"
+            data-action="expand-histogram"
+            aria-label="Expand lap time histogram"
+            aria-pressed="false"
+            title="Expand chart"
+          >
+            ⛶
+          </button>
+        `,
     visualHtml: `
           <div class="summary-card-visual">
-                        <button
-                            class="summary-card-expand-btn"
-                            type="button"
-                            data-action="expand-histogram"
-                            aria-label="Expand lap time histogram"
-                            aria-pressed="false"
-                            title="Expand chart"
-                        >
-                            ⛶
-                        </button>
             <div class="summary-card-histogram-chart" role="img" aria-label="Lap time histogram"></div>
           </div>
         `,
@@ -379,6 +385,7 @@ function initializeSummaryCardCharts(
   }
 
   const chart = echarts.init(chartElement);
+  allowPageWheelScroll(chartElement);
 
   const histogramCard = chartElement.closest('.summary-card');
   applyHistogramExpandedState({
@@ -453,7 +460,17 @@ function updateHistogramExpandButton(button: Element, expanded: boolean): void {
     'aria-label',
     expanded ? 'Collapse lap time histogram' : 'Expand lap time histogram',
   );
-  button.textContent = expanded ? '🗕' : '⛶';
+  button.textContent = expanded ? '-' : '⛶';
+}
+
+function allowPageWheelScroll(element: HTMLElement): void {
+  element.addEventListener(
+    'wheel',
+    (event) => {
+      event.stopPropagation();
+    },
+    { capture: true, passive: true },
+  );
 }
 
 function buildHistogramChartOption(

@@ -356,6 +356,7 @@ h1 {
   grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
+  position: relative;
   min-width: 0;
 }
 
@@ -449,9 +450,16 @@ h1 {
 }
 
 .filters-sidebar-toggle {
+  position: sticky;
+  top: 16px;
+  z-index: 10;
+  grid-column: 1;
+  grid-row: 1;
   justify-self: end;
+  align-self: start;
   width: 52px;
   height: 52px;
+  margin: 12px 12px 0 0;
   background: var(--color-accent);
   color: var(--color-accent-contrast);
   box-shadow:
@@ -577,11 +585,23 @@ textarea {
   min-width: 0;
 }
 
+#chart-tab .chart-panel {
+  grid-row: 1;
+}
+
 .summary-card {
-  padding: 18px 12px 18px 18px;
+  padding: 14px 10px 14px 14px;
   border-radius: 18px;
   background: var(--surface-card-gradient);
   border: 1px solid var(--color-border);
+}
+
+.summary-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  white-space: nowrap;
 }
 
 .summary-card strong {
@@ -603,10 +623,7 @@ textarea {
 }
 
 .summary-card-expand-btn {
-  position: absolute;
-  top: -4px;
-  right: -4px;
-  z-index: 3;
+  flex: 0 0 auto;
   width: 28px;
   height: 28px;
   border-radius: 999px;

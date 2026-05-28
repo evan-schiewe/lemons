@@ -97,6 +97,7 @@ export function createLapTimeChart(
   { onSelectLap, onLapRangeChange }: LapTimeChartHandlers,
 ): LapTimeChartHandle {
   const chart = echarts.init(element);
+  allowPageWheelScroll(element);
   let lapAxisBounds = { min: 0, max: 1 };
   let suppressZoomEvent = false;
   let zoomSyncTimer: ReturnType<typeof setTimeout> | null = null;
@@ -518,12 +519,6 @@ export function createLapTimeChart(
         ],
         dataZoom: [
           {
-            type: 'inside',
-            xAxisIndex: [0, 1, 2],
-            zoomOnMouseWheel: false,
-            moveOnMouseWheel: false,
-          },
-          {
             type: 'slider',
             bottom: 28,
             height: 32,
@@ -578,12 +573,6 @@ function applyZoomRange(
     chart.dispatchAction({
       type: 'dataZoom',
       dataZoomIndex: 0,
-      startValue: range.lapMin,
-      endValue: range.lapMax,
-    });
-    chart.dispatchAction({
-      type: 'dataZoom',
-      dataZoomIndex: 1,
       startValue: range.lapMin,
       endValue: range.lapMax,
     });
@@ -730,6 +719,16 @@ function getSinglePointSegments<T extends { lapNumber: number }>(
 
     return !hasPreviousNeighbor && !hasNextNeighbor;
   });
+}
+
+function allowPageWheelScroll(element: HTMLElement): void {
+  element.addEventListener(
+    'wheel',
+    (event) => {
+      event.stopPropagation();
+    },
+    { capture: true, passive: true },
+  );
 }
 
 function buildRangeAreas(rangeEvents: RangeEvent[]) {
