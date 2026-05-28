@@ -59,6 +59,7 @@ export class SyncController {
   private status: SyncConnectionStatus;
   private handlers: SyncControllerHandlers;
   private isSyncing: boolean;
+  private syncRequestedWhileBusy: boolean;
 
   constructor(db: SQLiteClient, handlers: SyncControllerHandlers = {}) {
     this.db = db;
@@ -70,6 +71,7 @@ export class SyncController {
     this.status = this.config ? 'reconnect-required' : 'disconnected';
     this.handlers = handlers;
     this.isSyncing = false;
+    this.syncRequestedWhileBusy = false;
   }
 
   async initFromLocation(location: Location = window.location): Promise<void> {
@@ -181,35 +183,48 @@ export class SyncController {
     this.emit();
 
     await this.syncRaces();
-    await this.pullRemote();
-    const seeded = await seedOutboxForUnsyncedAnnotations(this.db, this.config);
-    if (seeded) {
-      this.handlers.onStatus?.(
-        `Queued ${seeded} local annotation${seeded === 1 ? '' : 's'} for cloud sync.`,
-      );
-    }
+    await this.queueLocalAnnotationChanges();
     await this.flushPending();
+    await this.pullRemote();
     this.status = 'disconnected';
     this.emit();
   }
 
   async syncNow(): Promise<void> {
-    if (this.isSyncing || this.mode !== 'cloud-connected') {
+    if (this.mode !== 'cloud-connected') {
+      return;
+    }
+
+    if (this.isSyncing) {
+      this.syncRequestedWhileBusy = true;
       return;
     }
 
     this.isSyncing = true;
-    this.status = 'syncing';
-    this.emit();
 
     try {
-      await this.syncRaces();
-      await this.pullRemote();
-      await this.flushPending();
-      this.status = 'disconnected';
-      this.emit();
-    } catch (error) {
-      await this.handleSyncError(error);
+      while (this.mode === 'cloud-connected') {
+        this.syncRequestedWhileBusy = false;
+        this.status = 'syncing';
+        this.emit();
+
+        try {
+          await this.syncRaces();
+          await this.queueLocalAnnotationChanges();
+          await this.flushPending();
+          await this.pullRemote();
+          this.status = 'disconnected';
+          this.emit();
+        } catch (error) {
+          this.syncRequestedWhileBusy = false;
+          await this.handleSyncError(error);
+          break;
+        }
+
+        if (!this.syncRequestedWhileBusy) {
+          break;
+        }
+      }
     } finally {
       this.isSyncing = false;
     }
@@ -268,6 +283,19 @@ export class SyncController {
     if (applied) {
       this.handlers.onStatus?.(
         `Applied ${applied} cloud update${applied === 1 ? '' : 's'}.`,
+      );
+    }
+  }
+
+  private async queueLocalAnnotationChanges(): Promise<void> {
+    if (!this.config) {
+      return;
+    }
+
+    const seeded = await seedOutboxForUnsyncedAnnotations(this.db, this.config);
+    if (seeded) {
+      this.handlers.onStatus?.(
+        `Queued ${seeded} local annotation${seeded === 1 ? '' : 's'} for cloud sync.`,
       );
     }
   }

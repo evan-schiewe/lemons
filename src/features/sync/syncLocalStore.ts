@@ -364,8 +364,21 @@ export async function appendOutboxMutation(
   raceKey: string,
   payload: AnnotationPayload,
   clientRequestId: string = crypto.randomUUID(),
-): Promise<void> {
+): Promise<boolean> {
   const now = new Date().toISOString();
+  const existingRequest = db.queryOne<{ id: string }>(
+    `
+      SELECT id
+      FROM sync_outbox
+      WHERE workspace_id = ? AND client_request_id = ?
+      LIMIT 1
+    `,
+    [config.workspace_id, clientRequestId],
+  );
+  if (existingRequest) {
+    return false;
+  }
+
   db.execute(
     `
       INSERT OR IGNORE INTO sync_outbox (
@@ -387,6 +400,7 @@ export async function appendOutboxMutation(
     ],
   );
   await db.persist();
+  return true;
 }
 
 export async function seedOutboxForUnsyncedAnnotations(
@@ -403,8 +417,19 @@ export async function seedOutboxForUnsyncedAnnotations(
         FROM ${tableConfig.table} a
         JOIN races r ON r.id = a.race_id
         WHERE a.sync_server_sequence IS NULL
+          OR EXISTS (
+            SELECT 1
+            FROM sync_outbox o
+            WHERE o.workspace_id = ?
+              AND o.kind = ?
+              AND o.annotation_id = a.id
+              AND o.action = 'upsert'
+              AND o.status = 'accepted'
+              AND o.accepted_server_sequence = a.sync_server_sequence
+          )
         ORDER BY a.updated_at ASC
       `,
+      [config.workspace_id, kind],
     );
 
     for (const row of rows) {
@@ -414,16 +439,107 @@ export async function seedOutboxForUnsyncedAnnotations(
         continue;
       }
 
-      await appendOutboxMutation(
+      const payload = rowToPayload(kind, row);
+      const serverSequenceValue = Number(row.sync_server_sequence);
+      const serverSequence =
+        row.sync_server_sequence == null ||
+        !Number.isFinite(serverSequenceValue)
+          ? null
+          : serverSequenceValue;
+      const isUnsynced = serverSequence == null;
+      const changedSinceAccepted =
+        !isUnsynced &&
+        hasAcceptedPayloadDiverged(
+          db,
+          config.workspace_id,
+          kind,
+          annotationId,
+          serverSequence,
+          payload,
+        );
+      if (!isUnsynced && !changedSinceAccepted) {
+        continue;
+      }
+
+      if (changedSinceAccepted) {
+        markAnnotationRowUnsynced(db, tableConfig.table, annotationId);
+      }
+
+      if (
+        hasEquivalentPendingOutboxPayload(
+          db,
+          config.workspace_id,
+          kind,
+          'upsert',
+          annotationId,
+          payload,
+        )
+      ) {
+        continue;
+      }
+
+      const didQueue = await appendOutboxMutation(
         db,
         config,
         kind,
         'upsert',
         annotationId,
         raceKey,
-        rowToPayload(kind, row),
-        `seed:${kind}:${annotationId}`,
+        payload,
       );
+      if (didQueue) {
+        seeded += 1;
+      }
+    }
+  }
+
+  const tombstones = db.query<DbRow>(
+    `
+      SELECT *
+      FROM annotation_tombstones
+      WHERE workspace_id = ?
+        AND sync_server_sequence IS NULL
+      ORDER BY deleted_at ASC
+    `,
+    [config.workspace_id],
+  );
+
+  for (const tombstone of tombstones) {
+    const kind = `${tombstone.kind ?? ''}`;
+    if (!isAnnotationKind(kind)) {
+      continue;
+    }
+
+    const annotationId = `${tombstone.annotation_id ?? ''}`;
+    const raceKey = `${tombstone.race_key ?? ''}`;
+    if (!annotationId || !raceKey) {
+      continue;
+    }
+
+    const payload = { id: annotationId };
+    if (
+      hasEquivalentPendingOutboxPayload(
+        db,
+        config.workspace_id,
+        kind,
+        'delete',
+        annotationId,
+        payload,
+      )
+    ) {
+      continue;
+    }
+
+    const didQueue = await appendOutboxMutation(
+      db,
+      config,
+      kind,
+      'delete',
+      annotationId,
+      raceKey,
+      payload,
+    );
+    if (didQueue) {
       seeded += 1;
     }
   }
@@ -464,25 +580,59 @@ export async function markOutboxAccepted(
     );
 
     if (row.action === 'upsert') {
+      const current = db.queryOne<DbRow>(
+        `SELECT * FROM ${tableConfig.table} WHERE id = ?`,
+        [row.annotation_id],
+      );
+      const acceptedPayload = parsePayload(row.payload_json);
+      const canMarkLocalRowSynced =
+        current &&
+        serializePayload(rowToPayload(row.kind, current)) ===
+          serializePayload(acceptedPayload);
+
+      if (canMarkLocalRowSynced) {
+        db.execute(
+          `
+            UPDATE ${tableConfig.table}
+            SET
+              created_by = COALESCE(created_by, ?),
+              updated_by = ?,
+              sync_workspace_id = ?,
+              sync_server_sequence = ?,
+              sync_origin_client_id = ?,
+              updated_at = updated_at
+            WHERE id = ?
+          `,
+          [
+            submittedBy,
+            submittedBy,
+            row.workspace_id,
+            accepted.serverSequence,
+            row.client_id,
+            row.annotation_id,
+          ],
+        );
+      }
+    } else {
       db.execute(
         `
-          UPDATE ${tableConfig.table}
-          SET
-            created_by = COALESCE(created_by, ?),
-            updated_by = ?,
-            sync_workspace_id = ?,
-            sync_server_sequence = ?,
-            sync_origin_client_id = ?,
-            updated_at = updated_at
-          WHERE id = ?
+          INSERT INTO annotation_tombstones (
+            workspace_id, race_key, kind, annotation_id, deleted_at, deleted_by,
+            sync_server_sequence
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(workspace_id, race_key, kind, annotation_id) DO UPDATE SET
+            deleted_at = excluded.deleted_at,
+            deleted_by = excluded.deleted_by,
+            sync_server_sequence = excluded.sync_server_sequence
         `,
         [
-          submittedBy,
-          submittedBy,
           row.workspace_id,
-          accepted.serverSequence,
-          row.client_id,
+          row.race_key,
+          row.kind,
           row.annotation_id,
+          now,
+          submittedBy,
+          accepted.serverSequence,
         ],
       );
     }
@@ -609,6 +759,7 @@ export async function applyPulledMutations(
   }
 
   let applied = 0;
+  let cursorUpdates = 0;
   const knownRaceIds = new Map(
     getLocalRaceKeys(db).map((race) => [race.race_key, race.id]),
   );
@@ -623,11 +774,10 @@ export async function applyPulledMutations(
           return;
         }
 
-        if (mutation.action === 'delete') {
-          applyPulledDelete(db, workspaceId, mutation);
-        } else {
-          applyPulledUpsert(db, workspaceId, localRaceId, mutation);
-        }
+        const didApply =
+          mutation.action === 'delete'
+            ? applyPulledDelete(db, workspaceId, mutation)
+            : applyPulledUpsert(db, workspaceId, localRaceId, mutation);
 
         upsertRaceCursorSql(
           db,
@@ -636,11 +786,14 @@ export async function applyPulledMutations(
           mutation.serverSequence,
           new Date().toISOString(),
         );
-        applied += 1;
+        cursorUpdates += 1;
+        if (didApply) {
+          applied += 1;
+        }
       });
   });
 
-  if (applied) {
+  if (cursorUpdates) {
     await db.persist();
   }
 
@@ -705,6 +858,7 @@ export function createSyncAnnotationStore(
 
     async remove(kind, id) {
       const config = getActiveConfig();
+      const storedConfig = config ?? getSyncConfig(db);
       const tableConfig = ANNOTATION_TABLE_CONFIG[kind];
       const existing = db.queryOne<DbRow & { race_key?: string }>(
         `
@@ -715,6 +869,28 @@ export function createSyncAnnotationStore(
         `,
         [id],
       );
+
+      if (storedConfig && existing?.race_key) {
+        db.execute(
+          `
+            INSERT INTO annotation_tombstones (
+              workspace_id, race_key, kind, annotation_id, deleted_at,
+              deleted_by, sync_server_sequence
+            ) VALUES (?, ?, ?, ?, ?, NULL, NULL)
+            ON CONFLICT(workspace_id, race_key, kind, annotation_id) DO UPDATE SET
+              deleted_at = excluded.deleted_at,
+              deleted_by = NULL,
+              sync_server_sequence = NULL
+          `,
+          [
+            storedConfig.workspace_id,
+            existing.race_key,
+            kind,
+            id,
+            new Date().toISOString(),
+          ],
+        );
+      }
 
       await baseStore.remove(kind, id);
 
@@ -740,8 +916,15 @@ function applyPulledUpsert(
   workspaceId: string,
   localRaceId: string,
   mutation: SyncPulledMutation,
-): void {
+): boolean {
   const tableConfig = ANNOTATION_TABLE_CONFIG[mutation.kind];
+  if (
+    hasUnsyncedLocalAnnotation(db, tableConfig.table, mutation.annotationId) ||
+    hasUnsyncedAnnotationTombstone(db, workspaceId, mutation)
+  ) {
+    return false;
+  }
+
   const payload: AnnotationPayload = {
     ...mutation.payload,
     id: mutation.annotationId,
@@ -792,14 +975,20 @@ function applyPulledUpsert(
     `,
     values,
   );
+  return true;
 }
 
 function applyPulledDelete(
   db: SQLiteClient,
   workspaceId: string,
   mutation: SyncPulledMutation,
-): void {
+): boolean {
   const tableConfig = ANNOTATION_TABLE_CONFIG[mutation.kind];
+  if (
+    hasUnsyncedLocalAnnotation(db, tableConfig.table, mutation.annotationId)
+  ) {
+    return false;
+  }
 
   db.execute(`DELETE FROM ${tableConfig.table} WHERE id = ?`, [
     mutation.annotationId,
@@ -824,6 +1013,124 @@ function applyPulledDelete(
       mutation.submittedBy,
       mutation.serverSequence,
     ],
+  );
+  return true;
+}
+
+function hasUnsyncedLocalAnnotation(
+  db: SQLiteClient,
+  tableName: string,
+  annotationId: string,
+): boolean {
+  return Boolean(
+    db.queryOne<{ id: string }>(
+      `SELECT id FROM ${tableName} WHERE id = ? AND sync_server_sequence IS NULL`,
+      [annotationId],
+    ),
+  );
+}
+
+function hasUnsyncedAnnotationTombstone(
+  db: SQLiteClient,
+  workspaceId: string,
+  mutation: SyncPulledMutation,
+): boolean {
+  return Boolean(
+    db.queryOne<{ annotation_id: string }>(
+      `
+        SELECT annotation_id
+        FROM annotation_tombstones
+        WHERE workspace_id = ?
+          AND race_key = ?
+          AND kind = ?
+          AND annotation_id = ?
+          AND sync_server_sequence IS NULL
+      `,
+      [workspaceId, mutation.raceKey, mutation.kind, mutation.annotationId],
+    ),
+  );
+}
+
+function hasAcceptedPayloadDiverged(
+  db: SQLiteClient,
+  workspaceId: string,
+  kind: AnnotationKind,
+  annotationId: string,
+  serverSequence: number,
+  payload: AnnotationPayload,
+): boolean {
+  const accepted = db.queryOne<{ payload_json: string }>(
+    `
+      SELECT payload_json
+      FROM sync_outbox
+      WHERE workspace_id = ?
+        AND kind = ?
+        AND annotation_id = ?
+        AND action = 'upsert'
+        AND status = 'accepted'
+        AND accepted_server_sequence = ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `,
+    [workspaceId, kind, annotationId, serverSequence],
+  );
+  if (!accepted) {
+    return false;
+  }
+
+  return (
+    serializePayload(parsePayload(accepted.payload_json)) !==
+    serializePayload(payload)
+  );
+}
+
+function hasEquivalentPendingOutboxPayload(
+  db: SQLiteClient,
+  workspaceId: string,
+  kind: AnnotationKind,
+  action: 'upsert' | 'delete',
+  annotationId: string,
+  payload: AnnotationPayload,
+): boolean {
+  const pendingRows = db.query<{ payload_json: string }>(
+    `
+      SELECT payload_json
+      FROM sync_outbox
+      WHERE workspace_id = ?
+        AND kind = ?
+        AND action = ?
+        AND annotation_id = ?
+        AND status = 'pending'
+        AND attempts < 3
+    `,
+    [workspaceId, kind, action, annotationId],
+  );
+  if (action === 'delete') {
+    return pendingRows.length > 0;
+  }
+
+  const serializedPayload = serializePayload(payload);
+  return pendingRows.some(
+    (row) =>
+      serializePayload(parsePayload(row.payload_json)) === serializedPayload,
+  );
+}
+
+function markAnnotationRowUnsynced(
+  db: SQLiteClient,
+  tableName: string,
+  annotationId: string,
+): void {
+  db.execute(
+    `
+      UPDATE ${tableName}
+      SET
+        updated_by = NULL,
+        sync_server_sequence = NULL,
+        sync_origin_client_id = NULL
+      WHERE id = ?
+    `,
+    [annotationId],
   );
 }
 
@@ -872,6 +1179,21 @@ function parsePayload(json: string): AnnotationPayload {
   } catch {
     return {};
   }
+}
+
+function isAnnotationKind(value: string): value is AnnotationKind {
+  return value in ANNOTATION_TABLE_CONFIG;
+}
+
+function serializePayload(payload: AnnotationPayload): string {
+  return JSON.stringify(
+    Object.keys(payload)
+      .sort()
+      .reduce<AnnotationPayload>((result, key) => {
+        result[key] = payload[key];
+        return result;
+      }, {}),
+  );
 }
 
 function toSqlValue(value: unknown): SqlValue {

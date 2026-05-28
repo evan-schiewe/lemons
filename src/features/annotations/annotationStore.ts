@@ -188,7 +188,15 @@ export function createAnnotationStore(db: SQLiteClient): AnnotationStore {
           (field) => field !== 'created_at',
         );
         db.execute(
-          `UPDATE ${config.table} SET ${updateFields.map((field) => `${field} = ?`).join(', ')} WHERE id = ?`,
+          `
+            UPDATE ${config.table}
+            SET
+              ${updateFields.map((field) => `${field} = ?`).join(', ')},
+              updated_by = NULL,
+              sync_server_sequence = NULL,
+              sync_origin_client_id = NULL
+            WHERE id = ?
+          `,
           [...updateFields.map((field) => toSqlValue(record[field])), id],
         );
       } else {
