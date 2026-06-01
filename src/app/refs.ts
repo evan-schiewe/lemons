@@ -2,6 +2,9 @@ import { queryRequired } from '../utils/dom';
 
 export interface AppRefs {
   appInitStatus: HTMLElement | null;
+  themeToggle: HTMLButtonElement;
+  themeControl: HTMLElement;
+  themePreferenceInputs: NodeListOf<HTMLInputElement>;
   heroActionsHost: HTMLElement;
   dataActions: HTMLElement;
   dataActionsSlot: HTMLElement;
@@ -39,6 +42,11 @@ export interface AppRefs {
 export function createAppRefs(): AppRefs {
   return {
     appInitStatus: document.querySelector('#app-init-status'),
+    themeToggle: queryRequired<HTMLButtonElement>('#theme-toggle'),
+    themeControl: queryRequired<HTMLElement>('#theme-control'),
+    themePreferenceInputs: document.querySelectorAll(
+      'input[name="theme-preference"]',
+    ),
     heroActionsHost: queryRequired<HTMLElement>('#hero-actions-host'),
     dataActions: queryRequired<HTMLElement>('#data-actions'),
     dataActionsSlot: queryRequired<HTMLElement>('#data-actions-slot'),

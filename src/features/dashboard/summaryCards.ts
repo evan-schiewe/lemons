@@ -3,7 +3,7 @@ import { GridComponent, TooltipComponent } from 'echarts/components';
 import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
 import type { CallbackDataParams } from 'echarts/types/dist/shared';
-import { CHART_COLOR_TOKENS } from '../../app/theme';
+import { getChartColorTokens } from '../../app/theme';
 import type { LapRow, SummaryRow } from '../../types';
 import { escapeHtml, formatNumber } from '../../utils/format';
 import { formatDurationMs, formatLapTimeHHMMSS } from '../../utils/time';
@@ -506,6 +506,7 @@ function buildHistogramChartOption(
   options: { compact?: boolean; useLogScale?: boolean } = {},
 ) {
   const { compact = true, useLogScale = false } = options;
+  const chartColors = getChartColorTokens();
   const seriesData = histogramBins.map((bin) => {
     const count = Number(bin?.value) || 0;
     return {
@@ -531,7 +532,7 @@ function buildHistogramChartOption(
       nameTextStyle: compact
         ? undefined
         : {
-            color: CHART_COLOR_TOKENS.axisText,
+            color: chartColors.axisText,
             fontWeight: 600,
           },
       axisLabel: compact
@@ -548,7 +549,7 @@ function buildHistogramChartOption(
 
               return `${formatLapTimeHHMMSS(startMs)}\n${formatLapTimeHHMMSS(endMs)}`;
             },
-            color: CHART_COLOR_TOKENS.axisText,
+            color: chartColors.axisText,
             fontSize: 10,
             interval: 0,
             hideOverlap: false,
@@ -557,7 +558,7 @@ function buildHistogramChartOption(
           },
       axisLine: compact
         ? undefined
-        : { show: true, lineStyle: { color: CHART_COLOR_TOKENS.axisLine } },
+        : { show: true, lineStyle: { color: chartColors.axisLine } },
       axisTick: compact ? undefined : { show: true },
     },
     yAxis: {
@@ -566,11 +567,14 @@ function buildHistogramChartOption(
       show: false,
       splitLine: compact
         ? undefined
-        : { show: true, lineStyle: { color: CHART_COLOR_TOKENS.axisLine } },
+        : { show: true, lineStyle: { color: chartColors.splitLine } },
     },
     tooltip: {
       trigger: 'axis',
       confine: true,
+      backgroundColor: chartColors.tooltipBackground,
+      borderColor: chartColors.tooltipBorder,
+      textStyle: { color: chartColors.tooltipText },
       axisPointer: { type: 'shadow' },
       ...(compact
         ? {
@@ -618,7 +622,7 @@ function buildHistogramChartOption(
         data: seriesData,
         barCategoryGap: '24%',
         itemStyle: {
-          color: CHART_COLOR_TOKENS.histogramBar,
+          color: chartColors.histogramBar,
           borderRadius: [2, 2, 0, 0],
         },
       },

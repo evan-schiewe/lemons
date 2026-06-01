@@ -32,10 +32,20 @@ interface TimelineState {
 
 type TimelineDayPhase = 'day' | 'twilight' | 'night' | 'unknown';
 
+interface RgbColor {
+  r: number;
+  g: number;
+  b: number;
+}
+
 const TIMELINE_DAY_BAND_FALLBACK = 'var(--timeline-day-blue)';
 const TIMELINE_DAY_BLUE = [31, 126, 208] as const;
 const TIMELINE_SUNSET_ORANGE = [239, 125, 33] as const;
 const TIMELINE_NIGHT_BLACK = [8, 10, 13] as const;
+const LIGHT_EVENT_BADGE_TEXT = 'var(--color-event-badge-text-light)';
+const DARK_EVENT_BADGE_TEXT = 'var(--color-event-badge-text-dark)';
+const LIGHT_EVENT_BADGE_TEXT_RGB = { r: 255, g: 254, b: 248 };
+const DARK_EVENT_BADGE_TEXT_RGB = { r: 16, g: 17, b: 16 };
 const FIRST_LIGHT_MINUTES = 5 * 60 + 16;
 const SUNRISE_MINUTES = 5 * 60 + 47;
 const SUNSET_MINUTES = 20 * 60 + 23;
@@ -843,9 +853,12 @@ function renderEventCard(
   const bandMinutes = getTimelineBandMinutes(eventItem.event_time_iso);
   const phase = getTimelineDayPhase(eventItem.event_time_iso);
   const phaseIcon = renderTimelineDayPhaseIcon(eventItem.event_time_iso);
+  const eventStyle = renderTimelineEventStyle(
+    eventItem.color || ANNOTATION_COLOR_TOKENS.fallback,
+  );
 
   return `
-        <article class="timeline-card" data-timeline-band-color="${escapeHtml(bandColor)}" data-timeline-band-minutes="${escapeHtml(bandMinutes)}" data-timeline-day-phase="${phase}" style="--event-color: ${escapeHtml(eventItem.color || ANNOTATION_COLOR_TOKENS.fallback)};">
+        <article class="timeline-card" data-timeline-band-color="${escapeHtml(bandColor)}" data-timeline-band-minutes="${escapeHtml(bandMinutes)}" data-timeline-day-phase="${phase}" style="${escapeHtml(eventStyle)}">
             ${phaseIcon}
             <header class="timeline-card-header">
                 <div class="timeline-card-meta">
@@ -875,13 +888,16 @@ function renderDriverSwitchCard(
   const bandMinutes = getTimelineBandMinutes(eventItem.event_time_iso);
   const phase = getTimelineDayPhase(eventItem.event_time_iso);
   const phaseIcon = renderTimelineDayPhaseIcon(eventItem.event_time_iso);
+  const eventStyle = renderTimelineEventStyle(
+    eventItem.color || ANNOTATION_COLOR_TOKENS.driverStint,
+  );
   const driverTransition =
     oldDriverName && newDriverName
       ? `${oldDriverName} -> ${newDriverName}`
       : newDriverName || oldDriverName || 'Driver updated';
 
   return `
-        <article class="timeline-card timeline-card-driver-switch" data-timeline-band-color="${escapeHtml(bandColor)}" data-timeline-band-minutes="${escapeHtml(bandMinutes)}" data-timeline-day-phase="${phase}" style="--event-color: ${escapeHtml(eventItem.color || ANNOTATION_COLOR_TOKENS.driverStint)};">
+        <article class="timeline-card timeline-card-driver-switch" data-timeline-band-color="${escapeHtml(bandColor)}" data-timeline-band-minutes="${escapeHtml(bandMinutes)}" data-timeline-day-phase="${phase}" style="${escapeHtml(eventStyle)}">
             ${phaseIcon}
             <header class="timeline-card-header">
                 <div class="timeline-card-meta">
@@ -893,6 +909,120 @@ function renderDriverSwitchCard(
             </header>
         </article>
     `;
+}
+
+function renderTimelineEventStyle(color: string): string {
+  const eventColor = normalizeTimelineEventColor(color);
+  return `--event-color: ${eventColor}; --event-text-color: ${getTimelineBadgeTextColor(eventColor)};`;
+}
+
+function normalizeTimelineEventColor(color: string): string {
+  const trimmed = color.trim();
+  if (parseCssColor(trimmed)) {
+    return trimmed;
+  }
+
+  return ANNOTATION_COLOR_TOKENS.fallback;
+}
+
+function getTimelineBadgeTextColor(backgroundColor: string): string {
+  const color = parseCssColor(backgroundColor);
+  if (!color) {
+    return DARK_EVENT_BADGE_TEXT;
+  }
+
+  const lightContrast = getContrastRatio(color, LIGHT_EVENT_BADGE_TEXT_RGB);
+  const darkContrast = getContrastRatio(color, DARK_EVENT_BADGE_TEXT_RGB);
+  return lightContrast > darkContrast
+    ? LIGHT_EVENT_BADGE_TEXT
+    : DARK_EVENT_BADGE_TEXT;
+}
+
+function getContrastRatio(left: RgbColor, right: RgbColor): number {
+  const leftLuminance = getRelativeLuminance(left);
+  const rightLuminance = getRelativeLuminance(right);
+  const lighter = Math.max(leftLuminance, rightLuminance);
+  const darker = Math.min(leftLuminance, rightLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function getRelativeLuminance(color: RgbColor): number {
+  const channels = [color.r, color.g, color.b].map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.03928
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+
+  return channels[0] * 0.2126 + channels[1] * 0.7152 + channels[2] * 0.0722;
+}
+
+function parseCssColor(color: string): RgbColor | null {
+  const trimmed = color.trim().toLowerCase();
+  if (trimmed === 'black') {
+    return { r: 0, g: 0, b: 0 };
+  }
+  if (trimmed === 'white') {
+    return { r: 255, g: 255, b: 255 };
+  }
+
+  return parseHexColor(trimmed) ?? parseRgbColor(trimmed);
+}
+
+function parseHexColor(color: string): RgbColor | null {
+  const hex = color.match(/^#([\da-f]{3}|[\da-f]{6})$/i)?.[1];
+  if (!hex) {
+    return null;
+  }
+
+  const channels =
+    hex.length === 3
+      ? hex.split('').map((value) => Number.parseInt(`${value}${value}`, 16))
+      : [
+          Number.parseInt(hex.slice(0, 2), 16),
+          Number.parseInt(hex.slice(2, 4), 16),
+          Number.parseInt(hex.slice(4, 6), 16),
+        ];
+
+  return { r: channels[0], g: channels[1], b: channels[2] };
+}
+
+function parseRgbColor(color: string): RgbColor | null {
+  const match = color.match(/^rgba?\((.+)\)$/i);
+  if (!match) {
+    return null;
+  }
+
+  const channelsValue = match[1].split('/')[0].trim();
+  const parts = channelsValue.includes(',')
+    ? channelsValue.split(',').slice(0, 3)
+    : channelsValue.split(/\s+/).slice(0, 3);
+
+  if (parts.length !== 3) {
+    return null;
+  }
+
+  const channels = parts.map(parseRgbChannel);
+  if (channels.some((channel) => !Number.isFinite(channel))) {
+    return null;
+  }
+
+  return { r: channels[0], g: channels[1], b: channels[2] };
+}
+
+function parseRgbChannel(value: string): number {
+  const trimmed = value.trim();
+  if (trimmed.endsWith('%')) {
+    const percent = Number.parseFloat(trimmed.slice(0, -1));
+    return Number.isFinite(percent)
+      ? clamp(Math.round((percent / 100) * 255), 0, 255)
+      : Number.NaN;
+  }
+
+  const channel = Number.parseFloat(trimmed);
+  return Number.isFinite(channel)
+    ? clamp(Math.round(channel), 0, 255)
+    : Number.NaN;
 }
 
 function renderTimelineLapMeta(

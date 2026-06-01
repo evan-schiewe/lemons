@@ -13,6 +13,7 @@ import {
   syncAnnotationsTabVisibility,
   syncDataTabAndActions,
 } from './app/tabs';
+import { initializeThemeControls } from './app/theme';
 import { SQLiteClient } from './db/sqliteClient';
 import { mountAnnotationHelper } from './features/annotations/annotationHelperView';
 import { mountAnnotationPanel } from './features/annotations/annotationPanel';
@@ -272,6 +273,11 @@ initialize().catch((error) => {
 
 async function initialize(): Promise<void> {
   setAppLoadingState(true);
+  initializeThemeControls(refs.themePreferenceInputs, {
+    controlPanel: refs.themeControl,
+    onThemeChange: handleThemeChange,
+    toggleButton: refs.themeToggle,
+  });
   setStatus('Initializing browser SQLite cache...');
   state.db = await new SQLiteClient().init();
   syncController = new SyncController(state.db, {
@@ -490,6 +496,15 @@ function wireEvents(): void {
   window.addEventListener('resize', () => {
     charts.lapTime?.resize();
   });
+}
+
+async function handleThemeChange(): Promise<void> {
+  if (!state.db) {
+    return;
+  }
+
+  await refreshView();
+  charts.lapTime?.resize();
 }
 
 async function handleSyncConnect(): Promise<void> {

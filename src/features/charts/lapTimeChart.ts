@@ -9,7 +9,8 @@ import {
 } from 'echarts/components';
 import * as echarts from 'echarts/core';
 import { CanvasRenderer } from 'echarts/renderers';
-import { CHART_COLOR_TOKENS, CHART_SERIES_PALETTE } from '../../app/theme';
+import type { ChartColorTokens } from '../../app/theme';
+import { getChartColorTokens, getChartSeriesPalette } from '../../app/theme';
 import type {
   DriverStint,
   LapNote,
@@ -35,8 +36,6 @@ echarts.use([
   DataZoomSliderComponent,
   CanvasRenderer,
 ]);
-
-const PALETTE = [...CHART_SERIES_PALETTE];
 
 interface LapTimeChartHandlers {
   onSelectLap: (lapNumber: number) => void | Promise<void>;
@@ -151,6 +150,8 @@ export function createLapTimeChart(
       annotations: RaceAnnotations,
       options: { lapAxisBounds?: LapRangeBounds | null } = {},
     ) {
+      const chartColors = getChartColorTokens();
+      const palette = getChartSeriesPalette();
       const fastestSeconds = rows.reduce((fastest, row) => {
         if (
           typeof row.lap_time_ms !== 'number' ||
@@ -212,7 +213,7 @@ export function createLapTimeChart(
           smooth: false,
           showSymbol: false,
           lineStyle: { width: 2 },
-          itemStyle: { color: CHART_COLOR_TOKENS.lapLine },
+          itemStyle: { color: chartColors.lapLine },
           xAxisIndex: 0,
           yAxisIndex: 0,
           data: withGaps(lapTimePoints),
@@ -222,7 +223,7 @@ export function createLapTimeChart(
           type: 'scatter',
           symbol: 'circle',
           symbolSize: 9,
-          itemStyle: { color: CHART_COLOR_TOKENS.lapLine },
+          itemStyle: { color: chartColors.lapLine },
           xAxisIndex: 0,
           yAxisIndex: 0,
           data: getSinglePointSegments(lapTimePoints),
@@ -293,7 +294,7 @@ export function createLapTimeChart(
         xAxisIndex: 1,
         yAxisIndex: 1,
         data: [],
-        markArea: buildRangeAreas(annotations.rangeEvents),
+        markArea: buildRangeAreas(annotations.rangeEvents, chartColors),
         tooltip: { show: false },
         z: 1,
       };
@@ -302,7 +303,7 @@ export function createLapTimeChart(
         'Incidents',
         annotations.taggedIncidents,
         0,
-        CHART_COLOR_TOKENS.incidentMarker,
+        chartColors.incidentMarker,
         1,
         1,
         'diamond',
@@ -314,7 +315,7 @@ export function createLapTimeChart(
           type: 'line',
           smooth: false,
           showSymbol: false,
-          itemStyle: { color: CHART_COLOR_TOKENS.positionLine },
+          itemStyle: { color: chartColors.positionLine },
           lineStyle: { width: 2 },
           xAxisIndex: 2,
           yAxisIndex: 2,
@@ -335,7 +336,7 @@ export function createLapTimeChart(
           type: 'line',
           smooth: false,
           showSymbol: false,
-          itemStyle: { color: CHART_COLOR_TOKENS.gapLine },
+          itemStyle: { color: chartColors.gapLine },
           lineStyle: { width: 2, type: 'dashed' },
           xAxisIndex: 2,
           yAxisIndex: 3,
@@ -382,9 +383,13 @@ export function createLapTimeChart(
 
       chart.setOption({
         animationDuration: 250,
-        color: PALETTE,
+        color: palette,
+        textStyle: { color: chartColors.labelText },
         tooltip: {
           trigger: 'axis',
+          backgroundColor: chartColors.tooltipBackground,
+          borderColor: chartColors.tooltipBorder,
+          textStyle: { color: chartColors.tooltipText },
           formatter: (items: ChartTooltipParam[]) =>
             items
               .map((item) => {
@@ -410,16 +415,19 @@ export function createLapTimeChart(
           {
             top: 4,
             data: topLegendNames,
+            textStyle: { color: chartColors.axisText },
           },
           {
             left: 'center',
             top: '43%',
             data: middleLegendNames,
+            textStyle: { color: chartColors.axisText },
           },
           {
             left: 'center',
             bottom: 72,
             data: bottomLegendNames,
+            textStyle: { color: chartColors.axisText },
           },
         ],
         grid: [
@@ -453,6 +461,10 @@ export function createLapTimeChart(
             min: lapAxisMin,
             max: lapAxisMax,
             minInterval: 1,
+            axisLine: { lineStyle: { color: chartColors.axisLine } },
+            axisTick: { lineStyle: { color: chartColors.axisLine } },
+            axisLabel: { color: chartColors.axisText },
+            splitLine: { lineStyle: { color: chartColors.splitLine } },
           },
           {
             type: 'value',
@@ -461,6 +473,10 @@ export function createLapTimeChart(
             min: lapAxisMin,
             max: lapAxisMax,
             minInterval: 1,
+            axisLine: { lineStyle: { color: chartColors.axisLine } },
+            axisTick: { lineStyle: { color: chartColors.axisLine } },
+            axisLabel: { color: chartColors.axisText },
+            splitLine: { lineStyle: { color: chartColors.splitLine } },
           },
           {
             type: 'value',
@@ -471,6 +487,11 @@ export function createLapTimeChart(
             min: lapAxisMin,
             max: lapAxisMax,
             minInterval: 1,
+            nameTextStyle: { color: chartColors.axisText },
+            axisLine: { lineStyle: { color: chartColors.axisLine } },
+            axisTick: { lineStyle: { color: chartColors.axisLine } },
+            axisLabel: { color: chartColors.axisText },
+            splitLine: { lineStyle: { color: chartColors.splitLine } },
           },
         ],
         yAxis: [
@@ -481,8 +502,13 @@ export function createLapTimeChart(
             min: lapTimeAxisMin,
             max: lapTimeAxisMax,
             axisLabel: {
+              color: chartColors.axisText,
               formatter: (value: number) => formatDurationWholeSeconds(value),
             },
+            nameTextStyle: { color: chartColors.axisText },
+            axisLine: { lineStyle: { color: chartColors.axisLine } },
+            axisTick: { lineStyle: { color: chartColors.axisLine } },
+            splitLine: { lineStyle: { color: chartColors.splitLine } },
           },
           {
             type: 'value',
@@ -492,6 +518,8 @@ export function createLapTimeChart(
             interval: 1,
             axisLabel: { show: false },
             axisTick: { show: false },
+            axisLine: { lineStyle: { color: chartColors.axisLine } },
+            splitLine: { lineStyle: { color: chartColors.splitLine } },
           },
           {
             type: 'value',
@@ -500,8 +528,13 @@ export function createLapTimeChart(
             minInterval: 1,
             gridIndex: 2,
             nameTextStyle: {
+              color: chartColors.axisText,
               padding: [6, 0, 0, 0],
             },
+            axisLabel: { color: chartColors.axisText },
+            axisLine: { lineStyle: { color: chartColors.axisLine } },
+            axisTick: { lineStyle: { color: chartColors.axisLine } },
+            splitLine: { lineStyle: { color: chartColors.splitLine } },
           },
           {
             type: 'value',
@@ -509,9 +542,14 @@ export function createLapTimeChart(
             position: 'right',
             min: 0,
             gridIndex: 2,
+            nameTextStyle: { color: chartColors.axisText },
             axisLabel: {
+              color: chartColors.axisText,
               formatter: (value: number) => formatNumber(value),
             },
+            axisLine: { lineStyle: { color: chartColors.axisLine } },
+            axisTick: { lineStyle: { color: chartColors.axisLine } },
+            splitLine: { lineStyle: { color: chartColors.splitLine } },
           },
         ],
         dataZoom: [
@@ -521,6 +559,10 @@ export function createLapTimeChart(
             height: 32,
             xAxisIndex: [0, 1, 2],
             labelFormatter: (value: number) => `${Math.round(value)}`,
+            textStyle: { color: chartColors.axisText },
+            borderColor: chartColors.axisLine,
+            fillerColor: chartColors.dataZoomFill,
+            handleStyle: { color: chartColors.dataZoomHandle },
           },
         ],
         series: [
@@ -743,7 +785,10 @@ function allowPageWheelScroll(element: HTMLElement): void {
   );
 }
 
-function buildRangeAreas(rangeEvents: RangeEvent[]) {
+function buildRangeAreas(
+  rangeEvents: RangeEvent[],
+  chartColors: ChartColorTokens,
+) {
   return {
     silent: true,
     itemStyle: { opacity: 0.08 },
@@ -752,7 +797,7 @@ function buildRangeAreas(rangeEvents: RangeEvent[]) {
       position: 'insideBottom',
       formatter: (params: MarkAreaLabelParam) =>
         params?.data?.[0]?.name ?? params?.name ?? '',
-      color: CHART_COLOR_TOKENS.labelText,
+      color: chartColors.labelText,
       backgroundColor: 'transparent',
       borderColor: 'transparent',
       borderWidth: 0,

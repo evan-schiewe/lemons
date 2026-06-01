@@ -4,6 +4,36 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Witness the Citrus</title>
+    <script>
+      (() => {
+        const storageKey = 'lemons-theme-preference';
+        let preference = 'system';
+
+        try {
+          const storedPreference = localStorage.getItem(storageKey);
+          if (
+            storedPreference === 'light' ||
+            storedPreference === 'dark' ||
+            storedPreference === 'system'
+          ) {
+            preference = storedPreference;
+          }
+        } catch {
+          preference = 'system';
+        }
+
+        const effectiveTheme =
+          preference === 'system'
+            ? window.matchMedia?.('(prefers-color-scheme: dark)').matches
+              ? 'dark'
+              : 'light'
+            : preference;
+
+        document.documentElement.dataset.theme = effectiveTheme;
+        document.documentElement.dataset.themePreference = preference;
+        document.documentElement.style.colorScheme = effectiveTheme;
+      })();
+    </script>
   </head>
   <body>
     <div id="app">
@@ -41,19 +71,55 @@
             </g>
           </svg>
         </div>
-        <div id="hero-actions-host" hidden>
-          <div id="data-actions" class="hero-actions">
-            <label class="button primary" for="csv-input">Import CSV</label>
-            <input id="csv-input" type="file" accept=".csv,text/csv" multiple hidden />
-            <button id="export-json" class="button secondary" type="button">Export JSON</button>
-            <button id="export-sqlite" class="button secondary" type="button">Export SQLite</button>
-            <label class="button ghost" for="sqlite-input">Restore SQLite</label>
-            <input id="sqlite-input" type="file" accept=".sqlite,.db,application/x-sqlite3,application/vnd.sqlite3" hidden />
-            <button id="reset-starter-data" class="button ghost" type="button">Reset Starter Data</button>
+        <div class="hero-controls">
+          <div class="theme-menu">
+            <button
+              id="theme-toggle"
+              class="theme-toggle"
+              type="button"
+              aria-controls="theme-control"
+              aria-expanded="false"
+              aria-label="Choose theme"
+              title="Choose theme"
+            >
+              <svg class="theme-toggle-icon theme-toggle-icon-sun" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="12" cy="12" r="4" />
+                <path d="M12 2v2.5M12 19.5V22M4.93 4.93l1.77 1.77M17.3 17.3l1.77 1.77M2 12h2.5M19.5 12H22M4.93 19.07l1.77-1.77M17.3 6.7l1.77-1.77" />
+              </svg>
+              <svg class="theme-toggle-icon theme-toggle-icon-moon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d="M20 14.5A8 8 0 0 1 9.5 4 8.5 8.5 0 1 0 20 14.5Z" />
+              </svg>
+            </button>
+            <fieldset id="theme-control" class="theme-control" aria-label="Theme" hidden>
+              <legend class="sr-only">Theme</legend>
+              <label class="theme-option">
+                <input type="radio" name="theme-preference" value="system" />
+                <span>System</span>
+              </label>
+              <label class="theme-option">
+                <input type="radio" name="theme-preference" value="light" />
+                <span>Light</span>
+              </label>
+              <label class="theme-option">
+                <input type="radio" name="theme-preference" value="dark" />
+                <span>Dark</span>
+              </label>
+            </fieldset>
           </div>
-          <div id="sync-controls" class="sync-controls" hidden>
-            <span id="sync-status" class="status-pill">Local only</span>
-            <button id="sync-connect" class="button ghost" type="button" hidden>Connect Cloud Sync</button>
+          <div id="hero-actions-host" hidden>
+            <div id="data-actions" class="hero-actions">
+              <label class="button primary" for="csv-input">Import CSV</label>
+              <input id="csv-input" type="file" accept=".csv,text/csv" multiple hidden />
+              <button id="export-json" class="button secondary" type="button">Export JSON</button>
+              <button id="export-sqlite" class="button secondary" type="button">Export SQLite</button>
+              <label class="button ghost" for="sqlite-input">Restore SQLite</label>
+              <input id="sqlite-input" type="file" accept=".sqlite,.db,application/x-sqlite3,application/vnd.sqlite3" hidden />
+              <button id="reset-starter-data" class="button ghost" type="button">Reset Starter Data</button>
+            </div>
+            <div id="sync-controls" class="sync-controls" hidden>
+              <span id="sync-status" class="status-pill">Local only</span>
+              <button id="sync-connect" class="button ghost" type="button" hidden>Connect Cloud Sync</button>
+            </div>
           </div>
         </div>
       </header>
