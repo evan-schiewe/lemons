@@ -28,6 +28,12 @@ interface LocalRaceKeyRow extends DbRow {
   name: string;
 }
 
+export type PulledMutationConflictPolicy = 'preserve-local' | 'remote-wins';
+
+interface ApplyPulledMutationsOptions {
+  conflictPolicy?: PulledMutationConflictPolicy;
+}
+
 const SYNC_COLUMN_NAMES = new Set([
   'created_by',
   'updated_by',
@@ -753,11 +759,13 @@ export async function applyPulledMutations(
   db: SQLiteClient,
   workspaceId: string,
   mutations: SyncPulledMutation[],
+  options: ApplyPulledMutationsOptions = {},
 ): Promise<number> {
   if (!mutations.length) {
     return 0;
   }
 
+  const conflictPolicy = options.conflictPolicy ?? 'preserve-local';
   let applied = 0;
   let cursorUpdates = 0;
   const knownRaceIds = new Map(
@@ -776,8 +784,14 @@ export async function applyPulledMutations(
 
         const didApply =
           mutation.action === 'delete'
-            ? applyPulledDelete(db, workspaceId, mutation)
-            : applyPulledUpsert(db, workspaceId, localRaceId, mutation);
+            ? applyPulledDelete(db, workspaceId, mutation, conflictPolicy)
+            : applyPulledUpsert(
+                db,
+                workspaceId,
+                localRaceId,
+                mutation,
+                conflictPolicy,
+              );
 
         upsertRaceCursorSql(
           db,
@@ -916,11 +930,13 @@ function applyPulledUpsert(
   workspaceId: string,
   localRaceId: string,
   mutation: SyncPulledMutation,
+  conflictPolicy: PulledMutationConflictPolicy,
 ): boolean {
   const tableConfig = ANNOTATION_TABLE_CONFIG[mutation.kind];
   if (
-    hasUnsyncedLocalAnnotation(db, tableConfig.table, mutation.annotationId) ||
-    hasUnsyncedAnnotationTombstone(db, workspaceId, mutation)
+    conflictPolicy === 'preserve-local' &&
+    (hasUnsyncedLocalAnnotation(db, tableConfig.table, mutation.annotationId) ||
+      hasUnsyncedAnnotationTombstone(db, workspaceId, mutation))
   ) {
     return false;
   }
@@ -931,6 +947,11 @@ function applyPulledUpsert(
     race_id: localRaceId,
     created_at: mutation.payload.created_at || mutation.submittedAt,
     updated_at: mutation.payload.updated_at || mutation.submittedAt,
+    ...(mutation.kind === 'taggedIncident' || mutation.kind === 'journalEntry'
+      ? {
+          media_json: mutation.payload.media_json || '[]',
+        }
+      : {}),
     ...(mutation.kind === 'journalEntry'
       ? {
           event_time_source:
@@ -975,6 +996,18 @@ function applyPulledUpsert(
     `,
     values,
   );
+  if (conflictPolicy === 'remote-wins') {
+    db.execute(
+      `
+        DELETE FROM annotation_tombstones
+        WHERE workspace_id = ?
+          AND race_key = ?
+          AND kind = ?
+          AND annotation_id = ?
+      `,
+      [workspaceId, mutation.raceKey, mutation.kind, mutation.annotationId],
+    );
+  }
   return true;
 }
 
@@ -982,9 +1015,11 @@ function applyPulledDelete(
   db: SQLiteClient,
   workspaceId: string,
   mutation: SyncPulledMutation,
+  conflictPolicy: PulledMutationConflictPolicy,
 ): boolean {
   const tableConfig = ANNOTATION_TABLE_CONFIG[mutation.kind];
   if (
+    conflictPolicy === 'preserve-local' &&
     hasUnsyncedLocalAnnotation(db, tableConfig.table, mutation.annotationId)
   ) {
     return false;

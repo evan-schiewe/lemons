@@ -133,7 +133,9 @@ After apply, the `sync_api_base` output is the value the frontend needs as
 `VITE_SYNC_API_BASE`, and `media_public_base_url` is the value for
 `VITE_MEDIA_BASE_URL`. If `github_owner` and `github_repository` are set,
 OpenTofu writes both GitHub Actions variables automatically; otherwise set them
-in GitHub manually.
+in GitHub manually. `VITE_SYNC_PUBLIC_READ_TOKEN` is intentionally created
+outside OpenTofu; generate a read-only capability token and set it as a GitHub
+Actions variable when public deployed visits should auto-sync in read-only mode.
 
 ## Edit Links
 
@@ -161,6 +163,20 @@ Generated tokens default to:
 ```text
 annotations:read,annotations:write,races:read,races:write,media:write
 ```
+
+For public read-only deployment access, create a token without `--app-url` and
+with read scopes only:
+
+```bash
+TOKEN_SIGNING_SECRET='...' node cloudflare/worker/create-token.mjs \
+  --sub public-read \
+  --days 3650 \
+  --scope annotations:read,races:read \
+  --races '*'
+```
+
+Set the printed token as `VITE_SYNC_PUBLIC_READ_TOKEN`. It is embedded in the
+static frontend bundle, so never include write scopes on this token.
 
 The generated URL contains `?edit_token=...`. The browser stores that token in
 `sessionStorage`, removes it from the address bar, and requires an explicit

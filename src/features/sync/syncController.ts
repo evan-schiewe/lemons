@@ -8,7 +8,14 @@ import type {
 } from '../../types';
 import { readMediaBaseUrl } from '../media/media';
 import { prepareMediaUpload } from '../media/mediaUpload';
-import { SYNC_PUSH_BATCH_SIZE, SyncApiClient, SyncAuthError } from './syncApi';
+import type { SyncPulledMutation, SyncRaceCursorRequest } from './syncApi';
+import {
+  SYNC_PULL_BATCH_SIZE,
+  SYNC_PUSH_BATCH_SIZE,
+  SyncApiClient,
+  SyncAuthError,
+} from './syncApi';
+import type { PulledMutationConflictPolicy } from './syncLocalStore';
 import {
   appendRaceOutboxMutation,
   applyPulledMutations,
@@ -37,6 +44,9 @@ import {
 } from './syncLocalStore';
 
 const SESSION_TOKEN_KEY = 'lemons-race-viewer-sync-token';
+const READ_ONLY_REPLAY_REPAIR_VERSION = 'v2';
+const READ_ONLY_REPLAY_REPAIR_KEY_PREFIX =
+  'lemons-race-viewer-read-only-replay-repair';
 
 export interface SyncControllerSnapshot {
   mode: SyncMode;
@@ -52,6 +62,8 @@ interface SyncControllerHandlers {
   onChange?: (snapshot: SyncControllerSnapshot) => void;
   onStatus?: (message: string) => void;
 }
+
+type SyncTokenSource = 'url' | 'stored' | 'public-read';
 
 export class SyncController {
   private db: SQLiteClient;
@@ -84,21 +96,77 @@ export class SyncController {
       return;
     }
 
-    const token = readTokenFromLocation(location) ?? readStoredToken();
-    if (!token) {
+    const locationToken = readTokenFromLocation(location);
+    const storedToken = readStoredToken();
+    const publicReadToken =
+      this.mode === 'read-only' ? readPublicReadToken() : null;
+    const token = locationToken ?? storedToken ?? publicReadToken;
+    const tokenSource: SyncTokenSource | null = locationToken
+      ? 'url'
+      : storedToken
+        ? 'stored'
+        : publicReadToken
+          ? 'public-read'
+          : null;
+
+    if (!token || !tokenSource) {
+      if (this.mode === 'read-only') {
+        this.status = 'error';
+        this.handlers.onStatus?.(
+          'Public read-only cloud sync is missing VITE_SYNC_PUBLIC_READ_TOKEN.',
+        );
+        this.emit();
+        return;
+      }
+
       this.status = this.config ? 'reconnect-required' : 'disconnected';
       this.emit();
       return;
     }
 
-    storeToken(token);
-    removeTokenFromUrl(location);
-    await this.resolveToken(token);
+    if (tokenSource !== 'public-read') {
+      storeToken(token);
+      removeTokenFromUrl(location);
+    }
+
+    const didResolve = await this.resolveToken(token, {
+      authErrorMessage:
+        tokenSource === 'public-read'
+          ? 'Public read-only cloud sync needs a valid read token.'
+          : undefined,
+    });
+    if (!didResolve) {
+      if (
+        tokenSource === 'stored' &&
+        this.mode === 'read-only' &&
+        publicReadToken
+      ) {
+        await this.resolveAndSyncPublicReadToken(publicReadToken);
+      }
+      return;
+    }
+
     if (this.mode === 'read-only') {
-      if (sessionHasAnnotationWriteScope(this.session)) {
+      if (
+        tokenSource === 'public-read' &&
+        sessionHasAnyWriteScope(this.session)
+      ) {
+        this.status = 'error';
+        this.handlers.onStatus?.(
+          'VITE_SYNC_PUBLIC_READ_TOKEN must not include write scopes.',
+        );
+        this.emit();
+        return;
+      }
+
+      if (
+        tokenSource !== 'public-read' &&
+        sessionHasAnnotationWriteScope(this.session)
+      ) {
         this.mode = 'standalone';
         this.emit();
       } else {
+        await this.syncNow();
         return;
       }
     }
@@ -186,16 +254,16 @@ export class SyncController {
     this.status = 'syncing';
     this.emit();
 
-    await this.syncRaces();
-    await this.queueLocalAnnotationChanges();
-    await this.flushPending();
-    await this.pullRemote();
+    await this.syncCloudConnectedOnce();
     this.status = 'disconnected';
     this.emit();
   }
 
   async syncNow(): Promise<void> {
-    if (this.mode !== 'cloud-connected') {
+    if (this.mode !== 'cloud-connected' && this.mode !== 'read-only') {
+      return;
+    }
+    if (this.mode === 'read-only' && !this.session) {
       return;
     }
 
@@ -207,16 +275,17 @@ export class SyncController {
     this.isSyncing = true;
 
     try {
-      while (this.mode === 'cloud-connected') {
+      while (this.mode === 'cloud-connected' || this.mode === 'read-only') {
         this.syncRequestedWhileBusy = false;
         this.status = 'syncing';
         this.emit();
 
         try {
-          await this.syncRaces();
-          await this.queueLocalAnnotationChanges();
-          await this.flushPending();
-          await this.pullRemote();
+          if (this.mode === 'read-only') {
+            await this.syncReadOnlyOnce();
+          } else {
+            await this.syncCloudConnectedOnce();
+          }
           this.status = 'disconnected';
           this.emit();
         } catch (error) {
@@ -287,9 +356,74 @@ export class SyncController {
     return attachments;
   }
 
-  private async resolveToken(token: string): Promise<void> {
-    if (!this.api) {
+  private async resolveAndSyncPublicReadToken(token: string): Promise<void> {
+    const didResolve = await this.resolveToken(token, {
+      authErrorMessage: 'Public read-only cloud sync needs a valid read token.',
+    });
+    if (!didResolve) {
       return;
+    }
+
+    if (sessionHasAnyWriteScope(this.session)) {
+      this.status = 'error';
+      this.handlers.onStatus?.(
+        'VITE_SYNC_PUBLIC_READ_TOKEN must not include write scopes.',
+      );
+      this.emit();
+      return;
+    }
+
+    await this.syncNow();
+  }
+
+  private async syncCloudConnectedOnce(): Promise<void> {
+    if (!this.config) {
+      return;
+    }
+
+    await this.syncRaces({
+      allowPush: true,
+      workspaceId: this.config.workspace_id,
+    });
+    await this.queueLocalAnnotationChanges();
+    await this.flushPending();
+    await this.pullRemote(this.config.workspace_id);
+  }
+
+  private async syncReadOnlyOnce(): Promise<void> {
+    if (!this.session) {
+      return;
+    }
+
+    if (!sessionHasAnnotationReadScope(this.session)) {
+      throw new SyncAuthError(
+        'Public read-only cloud sync needs annotations:read scope.',
+        403,
+      );
+    }
+
+    await this.syncRaces({
+      allowPush: false,
+      workspaceId: this.session.workspaceId,
+    });
+    const replayFromStart = !readOnlyReplayRepairComplete(
+      this.session.workspaceId,
+    );
+    await this.pullRemote(this.session.workspaceId, {
+      conflictPolicy: 'remote-wins',
+      replayFromStart,
+    });
+    if (replayFromStart) {
+      markReadOnlyReplayRepairComplete(this.session.workspaceId);
+    }
+  }
+
+  private async resolveToken(
+    token: string,
+    options: { authErrorMessage?: string } = {},
+  ): Promise<boolean> {
+    if (!this.api) {
+      return false;
     }
 
     this.status = 'connecting';
@@ -299,38 +433,81 @@ export class SyncController {
       this.api.setToken(token);
       this.status = 'disconnected';
       this.emit();
+      return true;
     } catch (error) {
       clearStoredToken();
       this.session = null;
-      await this.handleSyncError(error);
+      await this.handleSyncError(error, options.authErrorMessage);
+      return false;
     }
   }
 
-  private async pullRemote(): Promise<void> {
-    if (!this.api || !this.config) {
+  private async pullRemote(
+    workspaceId: string,
+    options: {
+      conflictPolicy?: PulledMutationConflictPolicy;
+      replayFromStart?: boolean;
+    } = {},
+  ): Promise<void> {
+    if (!this.api || !workspaceId) {
       return;
     }
 
-    const raceCursors = getRaceCursorRequests(
-      this.db,
-      this.config.workspace_id,
-    );
-    if (!raceCursors.length) {
-      return;
+    const conflictPolicy = options.conflictPolicy ?? 'preserve-local';
+    const replayFromStart = options.replayFromStart ?? false;
+    let cursorRequests = replayFromStart
+      ? getRaceCursorRequests(this.db, workspaceId).map((cursor) => ({
+          ...cursor,
+          since: 0,
+        }))
+      : [];
+    let appliedTotal = 0;
+    let lastMutationSignature = '';
+
+    while (true) {
+      if (!replayFromStart) {
+        cursorRequests = getRaceCursorRequests(this.db, workspaceId);
+      }
+      if (!cursorRequests.length) {
+        return;
+      }
+
+      const response = await this.api.pull(
+        cursorRequests,
+        SYNC_PULL_BATCH_SIZE,
+      );
+      const applied = await applyPulledMutations(
+        this.db,
+        workspaceId,
+        response.mutations,
+        { conflictPolicy },
+      );
+      appliedTotal += applied;
+      await recordGlobalSequenceSeen(this.db, response.currentSequence);
+      this.config = getSyncConfig(this.db);
+
+      if (response.mutations.length < SYNC_PULL_BATCH_SIZE) {
+        break;
+      }
+
+      const mutationSignature = response.mutations
+        .map((mutation) => `${mutation.raceKey}:${mutation.serverSequence}`)
+        .join('|');
+      if (mutationSignature === lastMutationSignature) {
+        break;
+      }
+      lastMutationSignature = mutationSignature;
+      if (replayFromStart) {
+        cursorRequests = advanceCursorRequests(
+          cursorRequests,
+          response.mutations,
+        );
+      }
     }
 
-    const response = await this.api.pull(raceCursors);
-    const applied = await applyPulledMutations(
-      this.db,
-      this.config.workspace_id,
-      response.mutations,
-    );
-    await recordGlobalSequenceSeen(this.db, response.currentSequence);
-    this.config = getSyncConfig(this.db);
-
-    if (applied) {
+    if (appliedTotal) {
       this.handlers.onStatus?.(
-        `Applied ${applied} cloud update${applied === 1 ? '' : 's'}.`,
+        `Applied ${appliedTotal} cloud update${appliedTotal === 1 ? '' : 's'}.`,
       );
     }
   }
@@ -348,18 +525,20 @@ export class SyncController {
     }
   }
 
-  private async syncRaces(): Promise<void> {
-    if (!this.api || !this.config) {
+  private async syncRaces({
+    allowPush,
+    workspaceId,
+  }: {
+    allowPush: boolean;
+    workspaceId: string;
+  }): Promise<void> {
+    if (!this.api || !workspaceId) {
       return;
     }
 
     const response = await this.api.listRaces();
     await recordGlobalSequenceSeen(this.db, response.currentSequence);
     this.config = getSyncConfig(this.db);
-
-    if (!this.config) {
-      return;
-    }
 
     if (
       response.totalArtifactSizeBytes > response.autoDownloadMaxBytes &&
@@ -377,7 +556,7 @@ export class SyncController {
         const local = getRaceMetadataForSync(
           this.db,
           race.raceKey,
-          this.config.workspace_id,
+          workspaceId,
         );
         const shouldDownload =
           !localRaceKeys.has(race.raceKey) ||
@@ -394,12 +573,16 @@ export class SyncController {
         const artifact = await this.api.downloadRaceArtifact(race.raceKey);
         await this.db.importRaceArtifact(artifact.bytes, {
           ...race,
-          workspaceId: this.config.workspace_id,
+          workspaceId,
           artifactSha256:
             artifact.metadata.artifactSha256 || race.artifactSha256,
         });
         localRaceKeys.add(race.raceKey);
       }
+    }
+
+    if (!allowPush || !this.config) {
+      return;
     }
 
     const seeded = await seedRaceOutboxForUnsyncedRaces(this.db, this.config);
@@ -541,18 +724,24 @@ export class SyncController {
     }
   }
 
-  private async handleSyncError(error: unknown): Promise<void> {
+  private async handleSyncError(
+    error: unknown,
+    authErrorMessage?: string,
+  ): Promise<void> {
     console.error(error);
     if (error instanceof SyncAuthError) {
       clearStoredToken();
-      if (this.config) {
+      if (this.config && this.mode !== 'read-only') {
         await markSyncReconnectRequired(this.db);
         this.config = getSyncConfig(this.db);
       }
       this.mode = this.mode === 'read-only' ? 'read-only' : 'standalone';
-      this.status = 'reconnect-required';
+      this.status = this.mode === 'read-only' ? 'error' : 'reconnect-required';
       this.handlers.onStatus?.(
-        'Cloud sync needs a fresh edit token. Local editing remains available.',
+        authErrorMessage ||
+          (this.mode === 'read-only'
+            ? error.message || 'Read-only cloud sync needs a valid read token.'
+            : 'Cloud sync needs a fresh edit token. Local editing remains available.'),
       );
       this.emit();
       return;
@@ -575,8 +764,65 @@ function readSyncApiBase(): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function readPublicReadToken(): string | null {
+  const value = import.meta.env.VITE_SYNC_PUBLIC_READ_TOKEN;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
 function readOnlyModeEnabled(): boolean {
-  return import.meta.env.VITE_SYNC_READ_ONLY === 'true';
+  return (
+    import.meta.env.VITE_SYNC_READ_ONLY === 'true' ||
+    Boolean(readPublicReadToken())
+  );
+}
+
+function advanceCursorRequests(
+  cursorRequests: SyncRaceCursorRequest[],
+  mutations: SyncPulledMutation[],
+): SyncRaceCursorRequest[] {
+  const nextSinceByRaceKey = new Map(
+    cursorRequests.map((cursor) => [cursor.raceKey, cursor.since]),
+  );
+  mutations.forEach((mutation) => {
+    nextSinceByRaceKey.set(
+      mutation.raceKey,
+      Math.max(
+        nextSinceByRaceKey.get(mutation.raceKey) ?? 0,
+        mutation.serverSequence,
+      ),
+    );
+  });
+
+  return cursorRequests.map((cursor) => ({
+    ...cursor,
+    since: nextSinceByRaceKey.get(cursor.raceKey) ?? cursor.since,
+  }));
+}
+
+function readOnlyReplayRepairComplete(workspaceId: string): boolean {
+  try {
+    return (
+      localStorage.getItem(readOnlyReplayRepairKey(workspaceId)) ===
+      READ_ONLY_REPLAY_REPAIR_VERSION
+    );
+  } catch {
+    return false;
+  }
+}
+
+function markReadOnlyReplayRepairComplete(workspaceId: string): void {
+  try {
+    localStorage.setItem(
+      readOnlyReplayRepairKey(workspaceId),
+      READ_ONLY_REPLAY_REPAIR_VERSION,
+    );
+  } catch {
+    // If localStorage is unavailable, replaying on the next load is safe.
+  }
+}
+
+function readOnlyReplayRepairKey(workspaceId: string): string {
+  return `${READ_ONLY_REPLAY_REPAIR_KEY_PREFIX}:${workspaceId}`;
 }
 
 function readTokenFromLocation(location: Location): string | null {
@@ -612,6 +858,14 @@ function readStoredToken(): string | null {
 
 function sessionHasAnnotationWriteScope(session: SyncSession | null): boolean {
   return Boolean(session?.scopes?.includes('annotations:write'));
+}
+
+function sessionHasAnyWriteScope(session: SyncSession | null): boolean {
+  return Boolean(session?.scopes?.some((scope) => scope.endsWith(':write')));
+}
+
+function sessionHasAnnotationReadScope(session: SyncSession | null): boolean {
+  return Boolean(session?.scopes?.includes('annotations:read'));
 }
 
 function storeToken(token: string): void {

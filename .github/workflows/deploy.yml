@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_SYNC_API_BASE: ${{ vars.VITE_SYNC_API_BASE }}
+      VITE_SYNC_PUBLIC_READ_TOKEN: ${{ vars.VITE_SYNC_PUBLIC_READ_TOKEN }}
       VITE_SYNC_READ_ONLY: ${{ vars.VITE_SYNC_READ_ONLY }}
     steps:
       - name: Checkout code

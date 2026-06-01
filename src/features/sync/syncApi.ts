@@ -8,6 +8,7 @@ import type {
 import type { PreparedMediaUpload } from '../media/mediaUpload';
 
 export const SYNC_PUSH_BATCH_SIZE = 50;
+export const SYNC_PULL_BATCH_SIZE = 500;
 
 export interface SyncRaceCursorRequest {
   raceKey: string;
@@ -114,7 +115,7 @@ export class SyncApiClient {
 
   async pull(
     raceCursors: SyncRaceCursorRequest[],
-    limit = 500,
+    limit = SYNC_PULL_BATCH_SIZE,
   ): Promise<SyncPullResponse> {
     return this.post<SyncPullResponse>(
       '/v1/sync/pull',

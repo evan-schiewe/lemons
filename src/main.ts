@@ -552,7 +552,15 @@ function renderSyncControls(): void {
     : '';
 
   if (snapshot.mode === 'read-only') {
-    refs.syncStatus.textContent = 'Read-only';
+    if (snapshot.status === 'syncing' || snapshot.status === 'connecting') {
+      refs.syncStatus.textContent = 'Read-only cloud syncing';
+    } else if (snapshot.status === 'error') {
+      refs.syncStatus.textContent = 'Read-only cloud error';
+    } else if (snapshot.session) {
+      refs.syncStatus.textContent = 'Read-only cloud connected';
+    } else {
+      refs.syncStatus.textContent = 'Read-only';
+    }
   } else if (snapshot.mode === 'cloud-connected') {
     refs.syncStatus.textContent =
       snapshot.status === 'syncing'

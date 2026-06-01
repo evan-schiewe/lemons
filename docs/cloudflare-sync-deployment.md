@@ -155,14 +155,29 @@ not private access control.
 The GitHub Pages workflow reads these repository variables:
 
 - `VITE_SYNC_API_BASE`: sync Worker base URL, for example `https://lemons-sync-api.<subdomain>.workers.dev`
+- `VITE_SYNC_PUBLIC_READ_TOKEN`: public read-only capability token used by deployed read-only builds to auto-download cloud races and annotation/journal updates. This token is embedded in the static JavaScript bundle, so give it only `annotations:read,races:read` scopes.
 - `VITE_MEDIA_BASE_URL`: public media URL, for example `https://media.example.com`
-- `VITE_SYNC_READ_ONLY`: optional; set to `true` only to force production read-only mode
+- `VITE_SYNC_READ_ONLY`: optional; set to `true` to force production read-only mode even when the public read token is missing or invalid
 
 If Terraform/OpenTofu manages GitHub variables, `VITE_SYNC_API_BASE` is created automatically when `github_repository` and a derivable API URL are set, and `VITE_MEDIA_BASE_URL` is created when `github_repository` is set. Otherwise, create them manually in GitHub:
 
 `Settings -> Secrets and variables -> Actions -> Variables`
 
 After variables are configured, push to `main` and let the existing GitHub Pages workflow deploy the app.
+
+To create a public read-only token, omit `--app-url` so the command prints only
+the token value:
+
+```bash
+TOKEN_SIGNING_SECRET='...' node cloudflare/worker/create-token.mjs \
+  --sub public-read \
+  --days 3650 \
+  --scope annotations:read,races:read \
+  --races '*'
+```
+
+Use that output as the `VITE_SYNC_PUBLIC_READ_TOKEN` repository variable. Do not
+include `annotations:write`, `races:write`, or `media:write` in this token.
 
 ## Create Collaborative Edit Links
 
@@ -193,7 +208,12 @@ The browser stores the token in `sessionStorage` and removes it from the address
 
 ## Use Standalone Mode
 
-Standalone mode is the default when `VITE_SYNC_API_BASE` is missing or when no collaborator token is connected.
+Standalone mode is the default when `VITE_SYNC_API_BASE` is missing, or when no
+collaborator token is connected and no public read token is configured. When
+`VITE_SYNC_PUBLIC_READ_TOKEN` is set, plain deployed visits use that public
+read-only token to pull cloud data without enabling edits. `VITE_SYNC_READ_ONLY=true`
+can still be used to force the read-only state and surface a configuration error
+if the public read token is missing or invalid.
 
 Normal workflow:
 
